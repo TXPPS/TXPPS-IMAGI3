@@ -52,20 +52,51 @@ export interface Claim {
  * first; a format that only parses at the start of a line would be obeyed for a
  * week and then quietly worked around.
  */
-const CLAIM_PATTERN = /file:(?<path>[^\s`|]+)\s*@\s*(?<commit>[0-9a-f]{7,40})\b/giu;
+const CLAIM_PATTERN = /file:`?(?<path>[^\s`|]+)`?\s*@\s*(?<commit>[0-9a-f]{7,40})\b/giu;
 
-/** Every claim in a document, in the order they appear. */
+/**
+ * A commit named in prose next to a path, which is how these are actually
+ * written: ``fixed in `abc1234` (packages/core/src/graph.ts)``, or the reverse.
+ *
+ * The marker form above is opt-in, and at the P1 gate the whole documentation
+ * tree contained exactly one claim while dozens of bare parenthesised SHAs sat
+ * in gate tables unchecked. QA Automation demonstrated that the ledger caught
+ * only what someone had volunteered in one exact syntax. This form is not
+ * opt-in: a document that mentions a commit and a source path in the same
+ * breath is making a claim, and it is checked like one.
+ */
+const PROSE_PATTERN =
+  /`?(?<commit>[0-9a-f]{7,40})`?[^\n]{0,80}?[(`](?<path>(?:packages|apps|tools|tests)\/[^\s`)]+\.\w+)|[(`](?<path2>(?:packages|apps|tools|tests)\/[^\s`)]+\.\w+)[^\n]{0,80}?`?(?<commit2>[0-9a-f]{7,40})`?/giu;
+
+function collect(line: string, pattern: RegExp, source: string, lineNumber: number): Claim[] {
+  const claims: Claim[] = [];
+  // `matchAll` needs the global flag, and a global regex carries lastIndex
+  // between calls. Constructing per line keeps each scan independent.
+  for (const match of line.matchAll(new RegExp(pattern))) {
+    const path = match.groups?.['path'] ?? match.groups?.['path2'];
+    const commit = match.groups?.['commit'] ?? match.groups?.['commit2'];
+    if (path === undefined || commit === undefined) continue;
+    claims.push({ path, commit, source, line: lineNumber });
+  }
+  return claims;
+}
+
+/** Every claim in a document, in the order they appear, de-duplicated. */
 export function parseClaims(text: string, source: string): Claim[] {
   const claims: Claim[] = [];
-  const lines = text.split('\n');
-  for (const [index, line] of lines.entries()) {
-    // `matchAll` needs the global flag, and a global regex carries lastIndex
-    // between calls. Constructing per line keeps each scan independent.
-    for (const match of line.matchAll(new RegExp(CLAIM_PATTERN))) {
-      const path = match.groups?.['path'];
-      const commit = match.groups?.['commit'];
-      if (path === undefined || commit === undefined) continue;
-      claims.push({ path, commit, source, line: index + 1 });
+  const seen = new Set<string>();
+  for (const [index, line] of text.split('\n').entries()) {
+    const found = [
+      ...collect(line, CLAIM_PATTERN, source, index + 1),
+      ...collect(line, PROSE_PATTERN, source, index + 1),
+    ];
+    for (const claim of found) {
+      // Both patterns can match the same claim; the marker form contains a path
+      // and a sha, which is what the prose form looks for.
+      const key = `${claim.path}@${claim.commit}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      claims.push(claim);
     }
   }
   return claims;

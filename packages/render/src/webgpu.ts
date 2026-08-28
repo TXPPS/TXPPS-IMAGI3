@@ -1,25 +1,41 @@
 /**
- * The WebGPU leg, wired but unmeasured.
+ * The WebGPU leg. **Unimplemented, uncalled, and absent from the bundle.**
  *
- * three.js ships a separate WebGPU renderer under `three/webgpu`, so this is a
- * real code path and not a stub: the import happens, the renderer is
- * constructed, and its asynchronous initialisation is awaited. What is missing
- * is a browser to run it in. This environment provides Chromium without a
- * WebGPU adapter, so nothing here has ever produced a pixel.
+ * This header previously claimed the leg was "wired". It was not, and the
+ * correction matters more than the code below, so it is stated first. Visual QA
+ * checked the claim at the P1 gate and found three things false:
  *
- * That is the whole reason the module is separate and the import is dynamic.
+ * - **No caller.** `createWebGpuRenderer` and {@link hasWebGpu} are imported by
+ *   nothing — not by the app, not by a test.
+ * - **Not in the bundle.** The dynamic import is tree-shaken out entirely;
+ *   `WebGPURenderer` appears in no emitted chunk. There is no lazily-fetched
+ *   chunk because there is no reachable code.
+ * - **No draw path.** {@link createWebGpuRenderer} returns an object whose
+ *   `render` throws unconditionally. Given a GPU tomorrow, the parity procedure
+ *   in GAP-002 still could not capture a WebGPU frame.
  *
- * - **Separate**, so `view.ts` — the primary WebGL2 path — never imports the
- *   WebGPU build. Every device this engine targets runs WebGL2; most cannot run
- *   WebGPU at all, and making them download a renderer they will never
- *   construct is a cost paid by exactly the devices with the least headroom.
- * - **Dynamic**, so the bundler splits it into a chunk fetched only when a
- *   device actually has an adapter.
+ * What is true: `three/webgpu` resolves, and the construction and
+ * initialisation below typecheck. That is the whole of it — the path compiles.
+ * **Nothing here may be read as evidence that WebGPU rendering works, or that
+ * the only thing missing is hardware.** Two things are missing, and the code is
+ * the one this repository controls.
+ *
+ * The module stays separate and its import stays dynamic so that `view.ts` —
+ * the primary WebGL2 path — never pulls in the WebGPU build. Every device this
+ * engine targets runs WebGL2; most cannot run WebGPU at all, and making them
+ * download a renderer they will never construct is a cost paid by exactly the
+ * devices with the least headroom.
  *
  * The parity harness reports this leg as `unmeasured`, never `passed`, and it
- * is tracked as DV-001 in the DEVICE-VERIFIED register. Nothing in this file
- * may be read as evidence that WebGPU rendering works. It is evidence that the
- * path exists and compiles.
+ * is tracked as DV-001.
+ *
+ * **A trap for whoever wires this**, found by the same review: this container's
+ * Chromium exposes `navigator.gpu` while `requestAdapter()` returns null. So
+ * {@link hasWebGpu} returns true here, and the moment it is passed to
+ * `probeCapabilities`, `selectBackend(caps, 'webgpu')` would select WebGPU,
+ * initialisation would fail on the null adapter, and the error would propagate
+ * with no fallback — by design, since the caller chose the backend. Wire the
+ * probe and the fallback in the same change, not in separate ones.
  */
 
 export class WebGpuUnavailableError extends Error {

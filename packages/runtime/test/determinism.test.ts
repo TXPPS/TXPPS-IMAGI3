@@ -9,9 +9,10 @@ import {
   type Entity,
   type SceneDocument,
 } from '@imagi3/core';
-import { createInputTape, type InputFrame } from '../src/input.ts';
+import { EMPTY_INPUT, createInputTape, type InputFrame } from '../src/input.ts';
 import { runHeadless } from '../src/session.ts';
-import { SYSTEM_ORDER } from '../src/simulation.ts';
+import { SYSTEM_ORDER, createWorld, stepWorld } from '../src/simulation.ts';
+import { DEFAULT_STEP_MS } from '../src/tick.ts';
 
 /**
  * The P1 determinism gate: the same seed and the same input tape must produce
@@ -170,5 +171,27 @@ describe('system order', () => {
     // changes which entity gets which value. A change here should be a
     // deliberate one with this test updated alongside it.
     expect([...SYSTEM_ORDER]).toEqual(['input', 'jitter', 'drag', 'integrate', 'collide']);
+  });
+
+  /**
+   * The declaration is not the behaviour, and asserting one does not assert the
+   * other. QA Automation reversed the iteration inside `stepWorld` while
+   * leaving `SYSTEM_ORDER` untouched: 732 tests passed, lint and typecheck were
+   * clean, and the world was materially different. The guard-audit table
+   * recorded "any reorder fails the assertion", which was false.
+   */
+  it('is the sequence the step actually runs', () => {
+    const world = createWorld(scene, createRandom(1));
+    const ran: string[] = [];
+    stepWorld(world, EMPTY_INPUT, DEFAULT_STEP_MS, (name) => ran.push(name));
+    expect(ran).toEqual([...SYSTEM_ORDER]);
+  });
+
+  it('runs every declared system exactly once per step', () => {
+    const world = createWorld(scene, createRandom(1));
+    const ran: string[] = [];
+    stepWorld(world, EMPTY_INPUT, DEFAULT_STEP_MS, (name) => ran.push(name));
+    expect(ran).toHaveLength(SYSTEM_ORDER.length);
+    expect(new Set(ran).size).toBe(SYSTEM_ORDER.length);
   });
 });

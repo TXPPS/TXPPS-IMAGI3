@@ -18,6 +18,9 @@ importers:
       '@imagi3/audit':
         specifier: workspace:*
         version: link:tools/audit
+      '@imagi3/render':
+        specifier: workspace:*
+        version: link:packages/render
       '@imagi3/repo':
         specifier: workspace:*
         version: link:tools/repo

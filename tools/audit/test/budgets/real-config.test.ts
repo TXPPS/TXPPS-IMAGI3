@@ -39,14 +39,13 @@ const MANDATED: readonly (readonly [string, 'max' | 'min', number, string, strin
   ['editor.bundle.gzip', 'max', 5_000_000, 'P0', 'all'],
   ['runtime.bundle.gzip', 'max', 1_500_000, 'P1', 'all'],
   ['playmode.cpuFrame.tablet.reference2d', 'max', 8, 'P1', 'tablet'],
-  ['playmode.cpuFrame.phone.reference2d', 'max', 8, 'P1', 'phone'],
   // Deferred from P1 to P9, which is normally the silent-disable this list
   // exists to prevent. It is allowed here, and only here, because the budget
   // cannot be measured without a GPU — CI renders through SwiftShader, where an
   // empty scene already misses 60fps before the engine does anything. The
   // conditions that make the deferral legitimate are asserted below rather than
   // taken on trust. See ADR-0015, GAP-011 and DV-007.
-  ['playmode.fps.tablet.reference2d', 'min', 60, 'P9', 'tablet'],
+  ['playmode.droppedFrames.tablet.reference2d', 'max', 0.05, 'P9', 'tablet'],
   ['editor.frameSpike.max', 'max', 32, 'P3', 'all'],
   ['soak.heapGrowth.ratio', 'max', 1.1, 'P3', 'all'],
   ['playmode.fps.phone.reference3d', 'min', 30, 'P6', 'phone'],
@@ -79,16 +78,18 @@ describe('the committed budgets.json', () => {
    * into a precedent for deferring anything inconvenient.
    */
   describe('the one deferred budget', () => {
-    const deferred = rule('playmode.fps.tablet.reference2d');
+    const deferred = rule('playmode.droppedFrames.tablet.reference2d');
 
     it('is not enforced before P9, because no GPU here can measure it', () => {
       expect(deferred.enforcedFrom).toBe('P9');
     });
 
-    it('keeps the full 60fps target rather than a relaxed one', () => {
-      // Deferring a measurement is not the same as lowering a bar, and the two
-      // must not be allowed to blur into each other.
-      expect(deferred.min).toBe(60);
+    it('keeps the full 60fps target, stated so the instrument can express it', () => {
+      // Deferring a measurement is not the same as lowering a bar. The target
+      // is unchanged — "60fps" means "drops no frames at 60Hz" — but the
+      // original statistic, a p95 rAF interval, reads 59.2fps on an empty page
+      // and so could never have passed. See RC-0012.
+      expect(deferred.max).toBe(0.05);
     });
 
     it('says in its own source why it is deferred and where the claim lives', () => {
@@ -108,7 +109,7 @@ describe('the committed budgets.json', () => {
       // Everything else enforced from P9 would be a second deferral nobody
       // argued for. There is exactly one, and it is this one.
       const atP9 = document.rules.filter((r) => r.enforcedFrom === 'P9').map((r) => r.id);
-      expect(atP9).toEqual(['playmode.fps.tablet.reference2d']);
+      expect(atP9).toEqual(['playmode.droppedFrames.tablet.reference2d']);
     });
   });
 
@@ -119,15 +120,25 @@ describe('the committed budgets.json', () => {
     expect(rule('gpu.texture.phone').max).toBeLessThan(1024 * 1024 * 256);
   });
 
+  /**
+   * ADR-0006: a `max` alone accepts zero, so a harness bug that measures
+   * nothing reports a perfect score. This test was named "every duration and
+   * size budget" and iterated a hardcoded list of the four P0 ones — so the
+   * three rules P1 added had no floor and nobody noticed. Performance broke the
+   * play-mode instrument to `performance.now() - performance.now()` and the
+   * gate printed "0 ms within budget".
+   *
+   * Derived from the document now, so a rule cannot be added without one.
+   */
   it('gives every duration and size budget a plausibility floor', () => {
-    for (const id of [
-      'ci-headless.editor.coldLoad',
-      'editor.coldLoad.tablet',
-      'editor.coldLoad.phone',
-    ]) {
-      expect(rule(id).min, `${id} would accept zero or a negative measurement`).toBeGreaterThan(0);
+    const needFloors = document.rules.filter((r) => r.unit === 'ms' || r.unit === 'bytes');
+    expect(needFloors.length, 'no duration or size budgets were examined').toBeGreaterThan(4);
+    for (const budgetRule of needFloors) {
+      expect(
+        budgetRule.min,
+        `${budgetRule.id} has no floor, so a harness measuring nothing would score perfectly`,
+      ).toBeGreaterThan(0);
     }
-    expect(rule('editor.bundle.gzip').min).toBeGreaterThan(0);
   });
 
   it('documents provenance for every rule', () => {

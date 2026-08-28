@@ -38,34 +38,28 @@
       "scope": "all",
       "max": 1500000,
       "enforcedFrom": "P1",
-      "source": "brief-4-performance"
+      "source": "brief-4-performance",
+      "min": 1
     },
     {
-      "id": "playmode.fps.tablet.reference2d",
-      "description": "Sustained play-mode frame rate on the reference 2D scene, tablet profile.",
-      "unit": "fps",
+      "id": "playmode.droppedFrames.tablet.reference2d",
+      "description": "Fraction of frames that missed a vsync on the reference 2D scene, tablet profile. The brief's 60fps target, stated as something the instrument can express a pass for.",
+      "unit": "ratio",
       "scope": "tablet",
-      "min": 60,
+      "max": 0.05,
+      "min": 0,
       "enforcedFrom": "P9",
-      "source": "Brief P1 gate. Deferred to P9: it cannot be measured without a GPU. CI renders through SwiftShader, where an empty scene already costs 83ms per frame on the throttled tablet profile. See ADR-0015, GAP-011 and DV-007; the CI-measurable half is playmode.cpuFrame.tablet.reference2d."
+      "source": "Brief P1 gate, restated: a p95 rAF interval can never read 60fps even on an empty page, so the original min:60 was unsatisfiable by any engine. Deferred to P9 because it needs a GPU: CI renders through SwiftShader, where the throttled tablet profile drops frames with one entity on screen. See ADR-0015, GAP-011, DV-007 and RC-0012; the CI-measurable half is playmode.cpuFrame.tablet.reference2d."
     },
     {
       "id": "playmode.cpuFrame.tablet.reference2d",
-      "description": "Engine CPU work per frame on the reference 2D scene, tablet profile. Simulation plus scene-graph update; rasterisation is excluded and this makes no GPU claim.",
+      "description": "Engine CPU work per 60Hz frame on the reference 2D scene, tablet profile: one simulation step plus one scene-graph update and draw submission. Rasterisation is excluded and this makes no GPU claim.",
       "unit": "ms",
       "scope": "tablet",
       "max": 8,
       "enforcedFrom": "P1",
-      "source": "Derived: half of a 16.67ms 60Hz frame, rounded down. The other half must cover rasterisation, compositing and the gameplay a real project adds. Measured at 5.4ms p95 on the throttled tablet profile. See ADR-0015."
-    },
-    {
-      "id": "playmode.cpuFrame.phone.reference2d",
-      "description": "Engine CPU work per frame on the reference 2D scene, phone profile. Simulation plus scene-graph update; rasterisation is excluded and this makes no GPU claim.",
-      "unit": "ms",
-      "scope": "phone",
-      "max": 8,
-      "enforcedFrom": "P1",
-      "source": "Derived: half of a 16.67ms 60Hz frame, rounded down. The other half must cover rasterisation, compositing and the gameplay a real project adds. Measured at 5.4ms p95 on the throttled tablet profile. See ADR-0015."
+      "source": "Derived: half of a 16.67ms 60Hz frame, rounded down. The other half must cover rasterisation, compositing and the gameplay a real project adds. Measured at 4.66ms (0.26ms per step + 4.40ms per frame). A shippability bound catching regressions of about 1.7x and larger; run-to-run variance on the sub-millisecond components is roughly 2x on this host, so nothing tighter is achievable here. See ADR-0015 and RC-0011.",
+      "min": 0.01
     },
     {
       "id": "playmode.fps.phone.reference3d",
@@ -83,7 +77,8 @@
       "scope": "all",
       "max": 32,
       "enforcedFrom": "P3",
-      "source": "brief-4-performance"
+      "source": "brief-4-performance",
+      "min": 0.01
     },
     {
       "id": "playmode.heap.peak.phone",
@@ -92,7 +87,8 @@
       "scope": "phone",
       "max": 500000000,
       "enforcedFrom": "P6",
-      "source": "brief-4-performance"
+      "source": "brief-4-performance",
+      "min": 1
     },
     {
       "id": "gpu.texture.phone",
@@ -101,7 +97,8 @@
       "scope": "phone",
       "max": 256000000,
       "enforcedFrom": "P6",
-      "source": "brief-4-performance"
+      "source": "brief-4-performance",
+      "min": 1
     },
     {
       "id": "soak.heapGrowth.ratio",
@@ -114,7 +111,7 @@
     },
     {
       "id": "editor.bundle.gzip",
-      "description": "Editor application bundle, gzipped: every emitted JS and CSS asset, excluding source maps and the engine runtime chunk.",
+      "description": "Editor application shell, gzipped: every emitted JS and CSS asset, less source maps and less the engine runtime chunk. The two budgets are disjoint and must stay so.",
       "unit": "bytes",
       "scope": "all",
       "max": 5000000,

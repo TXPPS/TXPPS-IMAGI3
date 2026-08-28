@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { WorldSnapshot } from '@imagi3/runtime';
-import { interpolateSnapshots } from '../src/interpolate.ts';
+import {
+  createInterpolationScratch,
+  interpolateInto,
+  interpolateSnapshots,
+} from '../src/interpolate.ts';
 
 function snapshot(...entities: { id: string; x: number; y: number }[]): WorldSnapshot {
   return { entities: entities.map((e) => ({ ...e, vx: 0, vy: 0, controlled: false })) };
@@ -59,5 +63,42 @@ describe('interpolateSnapshots', () => {
 
   it('handles two empty snapshots', () => {
     expect(interpolateSnapshots(snapshot(), snapshot(), 0.5)).toEqual([]);
+  });
+
+  /**
+   * Interpolation must never write back. A value derived partly from wall-clock
+   * timing reaching simulation state is the end of reproducibility.
+   *
+   * This assertion exists because Visual QA showed the guarantee was protected
+   * only by accident: mutating `interpolateInto` to write into the snapshot
+   * failed three tests in a full run, but each of those passed when run alone.
+   * The detection came from cross-test contamination of shared fixtures, not
+   * from any assertion — so a routine refactor to per-test fixtures would have
+   * removed the guard with nothing turning red.
+   */
+  it('does not write into either snapshot', () => {
+    const before = snapshot({ id: 'a', x: 1, y: 2 }, { id: 'b', x: 3, y: 4 });
+    const after = snapshot({ id: 'a', x: 9, y: 9 }, { id: 'b', x: 9, y: 9 });
+    const beforeCopy = structuredClone(before);
+    const afterCopy = structuredClone(after);
+
+    interpolateSnapshots(before, after, 0.5);
+
+    expect(before).toEqual(beforeCopy);
+    expect(after).toEqual(afterCopy);
+  });
+
+  it('does not write into either snapshot through the callback form either', () => {
+    const before = snapshot({ id: 'a', x: 1, y: 2 });
+    const after = snapshot({ id: 'a', x: 9, y: 9 });
+    const beforeCopy = structuredClone(before);
+    const afterCopy = structuredClone(after);
+
+    interpolateInto(before, after, 0.5, createInterpolationScratch(), () => {
+      // Intentionally does nothing: the assertion is about the caller's inputs.
+    });
+
+    expect(before).toEqual(beforeCopy);
+    expect(after).toEqual(afterCopy);
   });
 });

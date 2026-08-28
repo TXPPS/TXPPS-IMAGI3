@@ -121,3 +121,47 @@ describe('formatClaimsReport', () => {
     expect(formatClaimsReport(verifyClaims([claim()], changed))).toContain('CLAIMS OK: 1');
   });
 });
+
+/**
+ * The forms the ledger missed at the P1 gate.
+ *
+ * QA Automation confirmed each of these produced zero findings while the whole
+ * documentation tree contained exactly one claim in the one syntax the parser
+ * knew. A ledger that catches only what someone volunteered in an exact form is
+ * not a guard against a failure that has happened three times.
+ */
+describe('forms the parser used to miss', () => {
+  const sha = '1946f48';
+
+  it.each([
+    [
+      'a commit named in prose before the path',
+      `Determinism repaired in commit ${sha} (packages/runtime/src/simulation.ts).`,
+    ],
+    [
+      'a path named before the commit',
+      `\`packages/runtime/src/simulation.ts\` was rewritten in ${sha}.`,
+    ],
+    ['a backticked path in the marker form', `file:\`packages/core/src/graph.ts\` @ ${sha}`],
+    ['a backticked sha in prose', `Fixed in \`${sha}\` (\`tools/audit/src/report.ts\`).`],
+  ])('finds %s', (_label, text) => {
+    expect(parseClaims(text, 'd')).toHaveLength(1);
+  });
+
+  it('does not invent a claim from a sha with no path near it', () => {
+    expect(parseClaims(`Verified by mutation (\`${sha}\`).`, 'd')).toEqual([]);
+  });
+
+  it('does not invent a claim from a path with no sha near it', () => {
+    expect(parseClaims('See `packages/core/src/graph.ts` for the repair.', 'd')).toEqual([]);
+  });
+
+  it('reports one claim, not two, when both forms match the same text', () => {
+    expect(parseClaims(`file:packages/core/src/graph.ts @ ${sha}`, 'd')).toHaveLength(1);
+  });
+
+  it('ignores a path outside the source trees', () => {
+    // `docs/…` and `node_modules/…` are not code changes this needs to verify.
+    expect(parseClaims(`Rewritten in ${sha} (docs/GATES.md).`, 'd')).toEqual([]);
+  });
+});

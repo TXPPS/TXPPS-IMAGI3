@@ -185,7 +185,9 @@ function collide(world: World): void {
  */
 export const SYSTEM_ORDER = ['input', 'jitter', 'drag', 'integrate', 'collide'] as const;
 
-const SYSTEMS: Readonly<Record<(typeof SYSTEM_ORDER)[number], System>> = {
+export type SystemName = (typeof SYSTEM_ORDER)[number];
+
+const SYSTEMS: Readonly<Record<SystemName, System>> = {
   input: applyInput,
   jitter: applyJitter,
   drag: applyDrag,
@@ -195,10 +197,27 @@ const SYSTEMS: Readonly<Record<(typeof SYSTEM_ORDER)[number], System>> = {
   },
 };
 
-/** Advance the world by exactly one fixed step. */
-export function stepWorld(world: World, input: InputFrame, stepMs: number): void {
+/**
+ * Advance the world by exactly one fixed step.
+ *
+ * `observer` exists so a test can assert the order systems actually run in.
+ * Asserting the `SYSTEM_ORDER` literal is not the same claim and does not imply
+ * it: QA Automation reversed the iteration here while leaving the array
+ * untouched, and all 732 tests passed on a materially different world. A guard
+ * that reads the declaration rather than the behaviour is a guard the defect
+ * walks past.
+ */
+export function stepWorld(
+  world: World,
+  input: InputFrame,
+  stepMs: number,
+  observer?: (name: SystemName) => void,
+): void {
   const stepSeconds = stepMs / MS_PER_SECOND;
-  for (const name of SYSTEM_ORDER) SYSTEMS[name](world, input, stepSeconds);
+  for (const name of SYSTEM_ORDER) {
+    observer?.(name);
+    SYSTEMS[name](world, input, stepSeconds);
+  }
 }
 
 /** A snapshot for interpolation and hashing. Never fed back into simulation. */

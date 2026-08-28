@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   PARITY_STATUSES,
+  ParityScopeError,
   WEBGPU_PARITY_GAP,
   formatParityReport,
   judgeParity,
@@ -18,13 +19,13 @@ const bad: ComparisonVerdict = { ok: false, detail: '2.1% of pixels differ' };
 
 describe('judgeParity', () => {
   it('passes a leg that was measured and matched', () => {
-    const report = judgeParity({ webgl2: good }, ['webgl2']);
+    const report = judgeParity({ webgl2: good, webgpu: good });
     expect(report.legs[0]?.status).toBe('passed');
     expect(report.ok).toBe(true);
   });
 
   it('violates a leg that was measured and differed', () => {
-    expect(judgeParity({ webgl2: bad }, ['webgl2']).ok).toBe(false);
+    expect(judgeParity({ webgl2: bad, webgpu: good }).ok).toBe(false);
   });
 
   it('reports an unrendered leg as unmeasured, not passed', () => {
@@ -39,8 +40,12 @@ describe('judgeParity', () => {
     expect(judgeParity({ webgl2: good }, ['webgl2', 'webgpu']).ok).toBe(false);
   });
 
-  it('is not ok when nothing was required, since that proves nothing', () => {
-    expect(judgeParity({}, []).ok).toBe(false);
+  it('is not ok when nothing was measured at all', () => {
+    expect(judgeParity({}).ok).toBe(false);
+  });
+
+  it('refuses an empty required set, which would prove nothing at all', () => {
+    expect(() => judgeParity({}, [])).toThrow(ParityScopeError);
   });
 
   it('names the deferred register entry that owns an unmeasured leg', () => {
@@ -59,6 +64,39 @@ describe('judgeParity', () => {
 
   it('keeps unmeasured a distinct status from passed and violated', () => {
     expect([...PARITY_STATUSES]).toEqual(['passed', 'violated', 'unmeasured']);
+  });
+});
+
+/**
+ * Every guarantee this module makes is about legs that are in `required`, so
+ * `required` itself is the attack surface. Visual QA supplied a call that
+ * omitted the backend it had not rendered and got `ok: true` with no mention of
+ * it — a plausible first draft, at a time when no caller existed to get it
+ * right.
+ */
+describe('the required set', () => {
+  it('defaults to every backend, so an omission cannot be silent', () => {
+    const report = judgeParity({ webgl2: good });
+    expect(report.unmeasured).toEqual(['webgpu']);
+    expect(report.ok).toBe(false);
+  });
+
+  it('rejects a call that narrows away the backend it did not render', () => {
+    expect(() => judgeParity({ webgl2: good }, ['webgl2'])).toThrow(ParityScopeError);
+  });
+
+  it('says which backend the narrowed call would have hidden', () => {
+    expect(() => judgeParity({ webgl2: good }, ['webgl2'])).toThrow(/webgpu/u);
+  });
+
+  it('rejects a repeated backend, which would double-count one leg', () => {
+    expect(() => judgeParity({ webgl2: good }, ['webgl2', 'webgl2', 'webgpu'])).toThrow(
+      ParityScopeError,
+    );
+  });
+
+  it('accepts the full set in any order', () => {
+    expect(judgeParity({ webgl2: good, webgpu: good }, ['webgpu', 'webgl2']).ok).toBe(true);
   });
 });
 

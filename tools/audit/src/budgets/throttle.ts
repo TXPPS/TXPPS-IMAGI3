@@ -54,13 +54,16 @@ export const MIN_PROBE_ITERATIONS = CPU_BENCH_ITERATIONS;
  * Each iteration is a 32-bit multiply feeding the next iteration, so the chain
  * cannot be parallelised and one iteration costs at least a multiply's latency
  * — a few cycles. This floor is 0.1 nanoseconds per iteration: a 10GHz core
- * retiring the whole dependent chain every cycle. It is not a calibration, it
- * is a physical impossibility line, set two orders of magnitude below any real
- * host so it can never fail an honest run.
+ * retiring the whole dependent chain every cycle. It is a physical
+ * impossibility line, not a calibration.
  *
- * It exists because sample arrays, unlike a scalar, can be checked against
- * physics. A control claiming 80 million dependent multiplies in half a
- * millisecond did not happen.
+ * **The margin, stated accurately.** For the 80M-iteration probe this floor is
+ * 8ms against a real control of about 100ms — a factor of **12.5**, not the
+ * "two orders of magnitude" this comment claimed until Performance measured it
+ * at the P1 gate. It also constrains only the control, and only from below,
+ * which is not the direction a fabricator would push: inflating the throttled
+ * side is unconstrained by it. It is a sanity check on one number, and that is
+ * all it is.
  */
 export const MIN_PLAUSIBLE_MS_PER_ITERATION = 1e-7;
 
@@ -159,9 +162,28 @@ export function probeFault(probe: ThrottleProbe): string | undefined {
   return undefined;
 }
 
+/**
+ * The median, averaging the two middle values for an even count.
+ *
+ * `sorted[floor(n/2)]` is the *upper* middle, so for two samples it returns the
+ * larger — the maximum, which this module's own documentation rejects as "not
+ * an estimate at all; the largest ratio the data can be made to yield".
+ * `observedThrottleRatio([1.0x, 9.0x])` returned 9.0x, discarding a page where
+ * throttling was entirely absent rather than halving the estimate for it.
+ *
+ * Unreachable today, because the sample and probe counts are both three. Fixed
+ * anyway: nothing pins those counts odd, and a guard that is correct only for
+ * the argument it currently receives is a guard waiting for a refactor.
+ * Found by Performance at the P1 gate.
+ */
 function median(values: readonly number[]): number {
+  if (values.length === 0) return Number.NaN;
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)] ?? Number.NaN;
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle] ?? Number.NaN;
+  const lower = sorted[middle - 1];
+  const upper = sorted[middle];
+  return lower === undefined || upper === undefined ? Number.NaN : (lower + upper) / 2;
 }
 
 /**

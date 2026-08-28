@@ -1,5 +1,6 @@
 import {
   cpuFrameMsFrom,
+  droppedFrameRatioFrom,
   frameRateFrom,
   type FrameSamples,
   type Measurement,
@@ -49,12 +50,11 @@ const READY_TIMEOUT_MS = 30_000;
  */
 const CPU_BUDGET_IDS = {
   tablet: 'playmode.cpuFrame.tablet.reference2d',
-  phone: 'playmode.cpuFrame.phone.reference2d',
 } as const;
 
-/** The deferred frame-rate budget, recorded so the number survives to P9. */
-const FPS_BUDGET_IDS = {
-  tablet: 'playmode.fps.tablet.reference2d',
+/** The deferred device budget, recorded so the number survives to P9. */
+const DROPPED_BUDGET_IDS = {
+  tablet: 'playmode.droppedFrames.tablet.reference2d',
 } as const;
 
 async function readSamples(page: Page): Promise<FrameSamples> {
@@ -137,19 +137,25 @@ test.describe('play mode', () => {
     // The frame-rate figure is recorded even though its budget is deferred to
     // P9, so the artifact carries the number this environment could produce and
     // a later run on real hardware has something to compare against.
-    const fpsBudgetId = FPS_BUDGET_IDS[profile.id as keyof typeof FPS_BUDGET_IDS];
-    if (fpsBudgetId !== undefined) {
+    const droppedBudgetId = DROPPED_BUDGET_IDS[profile.id as keyof typeof DROPPED_BUDGET_IDS];
+    if (droppedBudgetId !== undefined) {
+      const dropped = droppedFrameRatioFrom(samples);
       const frames = frameRateFrom(samples);
       measurements.push({
-        id: fpsBudgetId,
-        value: frames.fps,
-        origin: `tests/e2e/playmode.spec.ts (SOFTWARE RASTERISED, see DV-007) ${frames.detail}`,
+        id: droppedBudgetId,
+        value: dropped.ratio,
+        origin:
+          `tests/e2e/playmode.spec.ts (SOFTWARE RASTERISED, see DV-007) ${dropped.detail}; ` +
+          `reported rate ${frames.fps.toFixed(1)}fps, which no engine can push to 60 here`,
         throttle: probes,
       });
     }
     recordMeasurements(`playmode-${profile.id}`, measurements);
 
     expect(samples.entityCount).toBe(REFERENCE_2D_ENTITY_COUNT);
+    // Two counts from two sources that must agree: the document's, and what the
+    // renderer actually allocated. One number the page chose is not evidence.
+    expect(samples.meshCount).toBe(REFERENCE_2D_ENTITY_COUNT);
     expect(incidents).toEqual([]);
     expect(
       cpu.cpuMs,

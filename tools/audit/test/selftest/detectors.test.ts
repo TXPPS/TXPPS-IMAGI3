@@ -10,6 +10,12 @@ import { isBundleAsset, measureDirectory, totalGzipBytes } from '../../src/bundl
 import type { ConsoleAllowEntry } from '../../src/console/types.ts';
 import { PARITY_THRESHOLDS, compareImages } from '../../src/image/compare.ts';
 import { readAllMeasurements } from '../../src/measurements.ts';
+import {
+  cpuFrameMsFrom,
+  droppedFrameRatioFrom,
+  type FrameSamples,
+} from '../../src/budgets/frames.ts';
+import { probe } from '../helpers/probes.ts';
 import { noiseImage, solidImage, withScatteredShift, withWipedBlock } from '../helpers/images.ts';
 
 /**
@@ -68,6 +74,69 @@ const REFERENCE = noiseImage(120, 120, 4242);
  * would be certifying a comparator it never tested.
  */
 const FRAME = noiseImage(320, 320, 99);
+
+/** Budget document with a throttled device scope, for the evidence detector. */
+const THROTTLED_DOC: BudgetDocument = {
+  currentPhase: 'P3',
+  rules: [
+    {
+      id: 'demo.tablet',
+      description: 'Demo tablet budget',
+      unit: 'ms',
+      scope: 'tablet',
+      max: 100,
+      min: 1,
+      enforcedFrom: 'P0',
+      source: 'selftest',
+    },
+  ],
+};
+
+/** The committed ceilings, so the scenarios plant against the real bars. */
+const ENGINE_FRAME_CEILING_MS = 8;
+const DROPPED_CEILING = 0.05;
+
+interface FrameShape {
+  readonly simCost?: number;
+  readonly updateCost?: number;
+  readonly stepsPerFrame?: number;
+  readonly frameMs?: number;
+  readonly steps?: number;
+}
+
+/**
+ * Frame samples shaped like a real run, with one dimension planted at a time.
+ *
+ * Baseline is the reference scene's measured cost on the throttled tablet
+ * profile: 0.26ms per simulation step and 4.40ms per frame of scene-graph work
+ * and draw submission, totalling 4.66ms against the 8ms ceiling.
+ */
+function frameSamples(shape: FrameShape = {}): FrameSamples {
+  const frames = 120;
+  const steps = shape.stepsPerFrame ?? 1;
+  const sim = 0.26 * (shape.simCost ?? 1) * steps;
+  const update = 4.4 * (shape.updateCost ?? 1);
+  return {
+    frameMs: Array.from({ length: frames }, () => shape.frameMs ?? 16.7),
+    simMs: Array.from({ length: frames }, () => sim),
+    updateMs: Array.from({ length: frames }, () => update),
+    presentMs: Array.from({ length: frames }, () => 0),
+    stepsPerFrame: Array.from({ length: frames }, () => steps),
+    entityCount: 400,
+    meshCount: 400,
+    steps: shape.steps ?? frames * steps,
+  };
+}
+
+/** True when the frame statistics will produce a number at all. */
+function canCostFrames(samples: FrameSamples): boolean {
+  try {
+    cpuFrameMsFrom(samples);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const SCENARIOS: readonly DetectorScenario[] = [
   {
@@ -208,6 +277,68 @@ const SCENARIOS: readonly DetectorScenario[] = [
       canRead(tempDirWith('good.measurements.json', '[{"id":"demo.latency","value":1}]')),
     planted: () => canRead(tempDirWith('bad.measurements.json', '[{"id":"demo.latency"}]')),
   },
+  /**
+   * P1 detectors. Every one of these was missing when the P1 gate was first
+   * submitted, and the one that mattered — the engine frame budget offered as
+   * the substitute for a budget deferred to P9 — turned out not to detect a
+   * 3x regression in either half of what it claimed to measure. A budget
+   * introduced to justify deferring another budget needs a planted regression
+   * on the day it lands. See RC-0011.
+   */
+  {
+    detector: 'throttling evidence',
+    plantedDefect: 'a plausible slowdown asserted with no samples behind it',
+    clean: () =>
+      checkBudgets(THROTTLED_DOC, [{ id: 'demo.tablet', value: 50, throttle: [probe(4)] }]).ok,
+    planted: () =>
+      checkBudgets(THROTTLED_DOC, [
+        {
+          id: 'demo.tablet',
+          value: 50,
+          throttle: [{ ...probe(4), controlMs: [], throttledMs: [] }],
+        },
+      ]).ok,
+  },
+  {
+    detector: 'engine frame budget',
+    plantedDefect: 'frame work twice as expensive, which is the bound this can see',
+    clean: () => cpuFrameMsFrom(frameSamples()).cpuMs <= ENGINE_FRAME_CEILING_MS,
+    planted: () => cpuFrameMsFrom(frameSamples({ updateCost: 2 })).cpuMs <= ENGINE_FRAME_CEILING_MS,
+  },
+  {
+    /**
+     * The limit, asserted rather than left to be discovered. Simulation is 5%
+     * of this scene's engine frame cost, so a budget on the total cannot see a
+     * 3x change in it. That is a real gap and it is recorded in RC-0011 rather
+     * than papered over — this scenario exists to fail if anyone later claims
+     * otherwise.
+     */
+    detector: 'engine frame budget',
+    plantedDefect: 'simulation three times more expensive, which this CANNOT see',
+    clean: () => cpuFrameMsFrom(frameSamples()).cpuMs <= ENGINE_FRAME_CEILING_MS,
+    planted: () => cpuFrameMsFrom(frameSamples({ simCost: 3 })).cpuMs > ENGINE_FRAME_CEILING_MS,
+  },
+  {
+    detector: 'engine frame budget',
+    plantedDefect: 'a longer frame with proportionally more steps, which is not a regression',
+    clean: () => cpuFrameMsFrom(frameSamples()).cpuMs <= ENGINE_FRAME_CEILING_MS,
+    // The inverse control: a slower rasteriser must NOT move this budget. It
+    // moved it 44% before the statistic was derived per unit of work.
+    planted: () =>
+      cpuFrameMsFrom(frameSamples({ stepsPerFrame: 8 })).cpuMs > ENGINE_FRAME_CEILING_MS,
+  },
+  {
+    detector: 'dropped frame budget',
+    plantedDefect: 'every frame missing a vsync',
+    clean: () => droppedFrameRatioFrom(frameSamples({ frameMs: 16.7 })).ratio <= DROPPED_CEILING,
+    planted: () => droppedFrameRatioFrom(frameSamples({ frameMs: 100 })).ratio <= DROPPED_CEILING,
+  },
+  {
+    detector: 'frame sample refusal',
+    plantedDefect: 'a run whose simulation never stepped',
+    clean: () => canCostFrames(frameSamples()),
+    planted: () => canCostFrames(frameSamples({ steps: 0 })),
+  },
 ];
 
 function canParse(input: unknown): boolean {
@@ -268,7 +399,11 @@ describe('audit harness self-test', () => {
    * scenario, or adding a detector without listing it here, a deliberate edit
    * to this list rather than a silent omission.
    */
-  it('lists a scenario for every detector the phase 0 harness ships', () => {
+  it('lists a scenario for every detector the harness ships', () => {
+    // Scoped to "the phase 0 harness" until the P1 gate, which meant every
+    // detector P1 added was outside what this could complain about — and one of
+    // them, the engine frame budget, turned out not to detect anything. The
+    // scope is now the harness, not a phase. See RC-0011.
     expect(new Set(SCENARIOS.map((s) => s.detector))).toEqual(
       new Set([
         'budget checker',
@@ -279,6 +414,10 @@ describe('audit harness self-test', () => {
         'console guard',
         'bundle measurer',
         'measurement file reader',
+        'throttling evidence',
+        'engine frame budget',
+        'dropped frame budget',
+        'frame sample refusal',
       ]),
     );
   });

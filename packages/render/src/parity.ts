@@ -1,4 +1,4 @@
-import type { RenderBackend } from './backend.ts';
+import { RENDER_BACKENDS, type RenderBackend } from './backend.ts';
 
 /**
  * Cross-backend rendering parity.
@@ -13,11 +13,18 @@ import type { RenderBackend } from './backend.ts';
  * PASS, it cannot make a report `ok`, and the only place it is allowed to live
  * is the DEVICE-VERIFIED register, which never closes a phase.
  *
- * The comparison itself is real and runs today: two WebGL2 renders of the same
- * scene are compared with the same comparator and thresholds the WebGPU leg
- * will use. That keeps the harness honest — it is wired, exercised and known to
- * work, so when a WebGPU browser arrives the only thing that changes is which
- * pixels go in.
+ * **This module's own header previously claimed a comparison that did not
+ * exist** — that two WebGL2 renders were being compared today with the
+ * thresholds the WebGPU leg will use. Nothing called `judgeParity` outside its
+ * own unit test; the module and the comparator had never met. Visual QA found
+ * it at the P1 gate by grepping for callers, which is the check the claim
+ * should have invited and did not.
+ *
+ * It is wired now: `tests/e2e/parity.spec.ts` captures the reference scene
+ * twice on WebGL2, compares them with `PARITY_THRESHOLDS`, and asserts the
+ * report is *not* ok because the WebGPU leg is unmeasured. That test is what
+ * makes the sentence above true, and it is the reason `required` defaults to
+ * every backend rather than to whatever the caller remembers.
  */
 
 export const PARITY_STATUSES = ['passed', 'violated', 'unmeasured'] as const;
@@ -49,16 +56,49 @@ export interface ParityReport {
 /** The deferred register entry that owns the WebGPU parity claim. */
 export const WEBGPU_PARITY_GAP = 'DV-001';
 
+export class ParityScopeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ParityScopeError';
+  }
+}
+
 /**
  * Judge a set of legs.
  *
  * A leg with no comparison is `unmeasured`. That is the entire point, so it is
  * stated in one place: `undefined` in, `unmeasured` out, and `ok` false.
+ *
+ * **`required` defaults to every backend, and narrowing it is an error.** Every
+ * guarantee this module makes is a guarantee about legs that are in `required`;
+ * a caller that simply omits the backend it did not render gets a clean report
+ * with no mention of it, `ok: true`, and no deferred entry. Visual QA
+ * demonstrated exactly that call at the P1 gate — it is a plausible first
+ * draft, not a contrived one — and at the time no caller existed to get it
+ * right. So the safe set is the default and a smaller one throws: a harness
+ * that genuinely wants to test one backend in isolation should say so loudly
+ * rather than by omission.
+ *
+ * @throws {ParityScopeError} when `required` omits a known backend or repeats
+ * one, either of which makes the verdict mean less than it appears to.
  */
 export function judgeParity(
   comparisons: Readonly<Partial<Record<RenderBackend, ComparisonVerdict>>>,
-  required: readonly RenderBackend[],
+  required: readonly RenderBackend[] = RENDER_BACKENDS,
 ): ParityReport {
+  const unique = new Set(required);
+  if (unique.size !== required.length) {
+    throw new ParityScopeError(`required lists a backend twice: ${required.join(', ')}`);
+  }
+  const missing = RENDER_BACKENDS.filter((backend) => !unique.has(backend));
+  if (missing.length > 0) {
+    throw new ParityScopeError(
+      `required omits ${missing.join(', ')}, so the report would be silent about ` +
+        'a backend rather than reporting it unmeasured. Parity is a claim about every ' +
+        'backend or it is not a parity claim.',
+    );
+  }
+
   const legs = required.map((backend): ParityLeg => {
     const comparison = comparisons[backend];
     if (comparison === undefined) {

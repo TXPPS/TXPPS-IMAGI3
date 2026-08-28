@@ -45,17 +45,60 @@ iOS Safari. Nothing in the suite proves any of the following:
 
 CI runners have no GPU, and the development container has no working Docker
 daemon, so the WebGPU path cannot be exercised here. WebGL2 is the primary path
-per the brief, and it is the one CI will gate. WebGPU-versus-WebGL2 perceptual
-parity (0.5% differing pixels, SSIM >= 0.98) is implemented and unit-tested in
-`tools/audit/src/image/`, but has never been run against two real backends.
+per the brief, and it is the one CI gates.
+
+**Two things block this, not one.** The entry previously said the comparator was
+implemented and only hardware was missing. Visual QA showed that understated it,
+and the correction is the useful part of this entry:
+
+1. **No hardware.** As above.
+2. **No WebGPU draw path.** `packages/render/src/webgpu.ts` constructs and
+   initialises the three.js WebGPU renderer, and its `render()` throws
+   unconditionally. It has no caller, no test, and is tree-shaken out of every
+   emitted chunk. Given a GPU tomorrow, step 2 below is still impossible. The
+   code, not the hardware, is the part this repository controls.
+
+**And the comparator has a measured blind spot on renderer content.** The three
+gates were calibrated against the editor shell — text and antialiased chrome.
+The renderer draws flat-shaded quads on a flat field, and on that content Visual
+QA measured, with zero rasterisation noise:
+
+| Change to sprite colour | Verdict | diff  | mean SSIM | damaged windows |
+| ----------------------- | ------- | ----- | --------- | --------------- |
+| green +37/255           | PASS    | 0.00% | 0.99788   | 0.00%           |
+| all channels +24        | PASS    | 0.00% | 0.99823   | 0.00%           |
+| chroma rotated ±30      | PASS    | 0.00% | 0.99994   | 0.00%           |
+| every sprite → white    | fail    | 11.9% | 0.98931   | 0.00%           |
+
+Sprite colour may drift by up to **14.5% on a channel** and pass all three
+gates. Repainting every sprite pure white — the loudest colour regression short
+of erasing them — leaves both SSIM gates untripped, because SSIM measures
+structure and a uniform level shift over sparse flat regions barely moves it.
+Only the per-pixel gate fires, and on this content it is a step function whose
+trip point is the uncalibrated `DEFAULT_PIXEL_THRESHOLD` (GAP-003).
+
+That matters precisely here: **different sRGB or output-colour-space handling
+between WebGL2 and WebGPU is the most likely real divergence between the two
+backends**, and it is the class of difference these thresholds cannot see. The
+control holds — erasing 1 sprite in 400 is caught by two gates — so the failure
+is confined to colour.
 
 **Manual procedure:**
 
-1. On a desktop with a GPU and a WebGPU-capable browser, run
-   `pnpm test:e2e --grep parity` with the WebGPU path forced.
-2. Capture the reference scene on both backends at each device profile.
-3. Run the parity comparison and record diff ratio and SSIM per profile.
-4. If parity fails, the renderer diverges — that is a P1 bug, not a threshold
+1. Implement the WebGPU draw path, and wire `hasWebGpu(navigator)` into
+   `probeCapabilities` together with a fallback. Note the trap recorded in
+   `webgpu.ts`: this container exposes `navigator.gpu` while `requestAdapter()`
+   returns null, so the two changes must land together or play mode hard-fails.
+2. Calibrate `pixelThreshold` against renderer content, and add a signal that
+   colour drift can move — a per-channel mean or histogram delta over the drawn
+   region is cheap and is exactly what SSIM discards.
+3. On a desktop with a GPU and a WebGPU-capable browser, run
+   `pnpm test:e2e tests/e2e/render.spec.ts` with the WebGPU path forced. (The
+   previous version of this step named `--grep parity`, which matched no test
+   because the harness had no caller; the spec now exists.)
+4. Capture the reference scene on both backends at each device profile.
+5. Run the parity comparison and record diff ratio and SSIM per profile.
+6. If parity fails, the renderer diverges — that is a P1 bug, not a threshold
    to relax.
 
 ---
@@ -326,9 +369,15 @@ profile misses 60fps with **one** entity on screen, and identical scene logic at
 DPR 1 versus DPR 2 costs 26ms versus 60ms per frame.
 
 What is measured instead, and enforced from P1, is the engine's own CPU work per
-frame with rasterisation excluded — 2.5ms at the median on the throttled tablet
-profile, against an 8ms ceiling. That is a real budget on code in this
-repository. It is not a frame-rate claim and must never be reported as one.
+60Hz frame with rasterisation excluded — 4.66ms on the throttled tablet profile
+against an 8ms ceiling. That is a real budget on code in this repository. It is
+not a frame-rate claim and must never be reported as one.
+
+**Its sensitivity is bounded and stated**: it catches roughly a doubling of the
+engine's per-frame cost, and cannot see a 3x regression confined to simulation,
+which is 5% of this scene's engine frame cost. Nothing tighter is achievable on
+this host, where run-to-run variance on the sub-millisecond components is about
+2x. See RC-0011.
 
 **Manual procedure (required before claiming DV-007):**
 
@@ -337,15 +386,31 @@ repository. It is not a frame-rate claim and must never be reported as one.
    WebGPU.
 2. Open `/?play=reference2d`, let it run for 30 seconds, and read
    `window.__imagi3FrameSamples()`.
-3. Confirm the p95 whole-frame duration is at or under 16.67ms across the
-   sample window, with 400 entities and a non-zero step count in the same
-   artifact.
+3. Confirm that **no more than 5% of frames exceeded 25ms** across the sample
+   window, with 400 entities and a non-zero step count in the same artifact.
+
+   The previous version of this step said "confirm the p95 whole-frame duration
+   is at or under 16.67ms". That could not have been discharged: the interval
+   between animation-frame callbacks is set by the compositor's 60Hz frame
+   source, and an empty page with no engine at all measures a p95 of 16.90ms. A
+   procedure that a flawless device fails is a permanent hold recorded as a
+   temporary one. See RC-0012.
+
 4. Repeat on a mid-range Android tablet in Chrome, and on an iPhone for the
    phone profile.
 5. Record the numbers, the devices and the OS versions in docs/BUDGETS.md, and
    move `playmode.fps.tablet.reference2d` back to `enforcedFrom: P1`.
 
-**What would invalidate the deferral rather than close it:** if the engine's
-own CPU budget ever needs raising to pass, the deferral stops being about the
-GPU. The 8ms ceiling is derived from the frame budget, not fitted to the
-measurement, and raising it is a decision that needs its own ADR.
+**What would invalidate the deferral rather than close it**, in either
+direction:
+
+- If the engine's own CPU budget ever needs **raising** to pass, the deferral
+  stops being about the GPU.
+- If it turns out the budget cannot **fail** for a regression anyone cares
+  about, the substitution that justified the deferral is void. That is what
+  happened at the P1 gate review, and it took a planted regression to find —
+  the audit self-test had never been extended past P0's eight detectors. It has
+  been now.
+
+The 8ms ceiling is derived from the frame budget, not fitted to the measurement,
+and changing it in either direction is a decision that needs its own ADR.

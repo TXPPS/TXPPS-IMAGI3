@@ -19,7 +19,8 @@ import {
  */
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const DEFAULT_DIR = join(REPO_ROOT, 'docs');
+const DEFAULT_DIR = REPO_ROOT;
+const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'dist-types', '.audit-out', '.git']);
 const EXIT_FAILED = 1;
 
 /**
@@ -43,11 +44,22 @@ function gitDiff(commit: string, path: string): DiffOutcome {
   }
 }
 
+/**
+ * Every markdown file in the repository, not just `docs/*.md`.
+ *
+ * The previous scope missed `README.md`, `CHANGELOG.md` and anything in a
+ * `docs/` subdirectory — three places a claim about a code change is at least
+ * as likely to be written as the gate tables.
+ */
 function markdownFilesIn(directory: string): string[] {
-  return readdirSync(directory)
-    .filter((name) => name.endsWith('.md'))
-    .sort()
-    .map((name) => join(directory, name));
+  const found: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (SKIP_DIRECTORIES.has(entry.name)) continue;
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...markdownFilesIn(path));
+    else if (entry.name.endsWith('.md')) found.push(path);
+  }
+  return found.sort();
 }
 
 function collectClaims(files: readonly string[]): Claim[] {

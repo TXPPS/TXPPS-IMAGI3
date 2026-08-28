@@ -23,3 +23,6 @@ export const FRAME_SAMPLES_KEY = '__imagi3FrameSamples';
 
 /** Attribute set on <html> once the first frame has been drawn. */
 export const PLAYING_ATTRIBUTE = 'data-app-playing';
+
+/** Freezes the loop, so a harness can compare two captures of the same frame. */
+export const STOP_PLAY_MODE_KEY = '__imagi3StopPlayMode';

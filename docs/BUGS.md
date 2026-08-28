@@ -302,3 +302,237 @@ budget already exists and is enforced from P3; what is missing is a harness that
 drives the operation. That harness is part of closing this entry, not a separate
 task, because a performance claim with no measurement behind it is what this
 project has repeatedly had to unlearn.
+
+---
+
+## RC-0009 — Deleting every draw call in the engine left the whole suite green
+
+**Found by:** Visual QA at the P1 gate, by mutation. **Severity:** high.
+**Status:** fixed.
+
+The mutation was one line — replacing the body of `SceneView.present` with
+nothing, which removes every draw call the engine makes:
+
+```ts
+present: () => {
+  /* MUTATION: draw nothing at all */
+},
+```
+
+Under it: **732 unit tests passed, 62 end-to-end tests passed across three
+device profiles**, and the page rendered 3,840,000 pixels of exactly one colour.
+The suite could not tell a working renderer from a blank canvas.
+
+**Why nothing caught it.** Every guard on play mode lived _upstream of
+rasterisation_: a `data-backend` attribute, a simulation step count, an entity
+count, and a CPU timing that deliberately excludes `present()`. All four are
+satisfied by a renderer that draws nothing. `visual.spec.ts` has an assertion
+named "renders content rather than a blank frame" — pointed at the static editor
+shell, not at the renderer. And `data-app-playing` is set unconditionally inside
+the animation callback after `present()` returns, so it attests that a frame
+callback ran, not that anything was drawn.
+
+**This is RC-0002, RC-0006 and RC-0007 at subsystem scale.** RC-0002: assert the
+absence of something only alongside the presence of something from the same
+artifact. RC-0006: a guard upstream of the thing it guards survives the thing's
+deletion. RC-0007: a guard is absent wherever nobody wrote one, and the absence
+is invisible exactly where it matters. P1's headline claim was that a real
+renderer exists, and the evidence offered was a green suite that a no-op
+renderer also turns green.
+
+**Fix:** `tests/e2e/render.spec.ts` asserts properties of the rendered frame on
+every device profile — sprite pixel coverage above a floor derived from the
+scene, more than one distinct colour, two captures separated in time that
+differ, a square world quad drawn square, and content reaching the far half of a
+rotated viewport. Deliberately not baseline comparisons: ADR-0010's deferral of
+committed baselines is about font rasterisation differing between environments,
+and none of these invariants need environments to agree about antialiasing.
+
+**Wider lesson.** "We do not have baselines yet" was allowed to stand in for "we
+have no visual assertion of any kind". Those are different, and the cheap one
+was available the whole time. When a subsystem's coverage is deferred, write
+down what is still being asserted about it — if the answer is nothing, that is
+the finding.
+
+---
+
+## RC-0010 — Two doc comments asserted things that were not true of the code
+
+**Found by:** Visual QA at the P1 gate, by checking claims against the tree.
+**Severity:** medium. **Status:** fixed.
+
+Two headers in `packages/render` made checkable claims that were false.
+
+`parity.ts` said: _"The comparison itself is real and runs today: two WebGL2
+renders of the same scene are compared with the same comparator and thresholds
+the WebGPU leg will use... it is wired, exercised and known to work."_ Nothing
+called `judgeParity` outside its own unit test. The module and the comparator
+had never met. `docs/GAPS.md` GAP-002 then instructed a future engineer to run
+`pnpm test:e2e --grep parity`, which matched zero tests.
+
+`webgpu.ts` said the leg was _"wired"_ and that _"the import happens, the
+renderer is constructed, and its asynchronous initialisation is awaited"_, and
+that the bundler _"splits it into a chunk fetched only when a device actually
+has an adapter"_. It had no caller, no test, and appeared in **no emitted
+chunk** — it was tree-shaken out entirely. Its `render()` throws
+unconditionally. The commit message that introduced it repeated the claim:
+"genuinely wired behind a dynamic import rather than stubbed".
+
+**Why this is RC-0005 in a new place.** RC-0005 was a fix recorded as landed
+before it landed, and the remedy was the claims ledger — but the ledger checks
+that a _commit touches a path_, which both of these did. A claim about what code
+_does_ is not covered by it, and this is the failure mode that remains.
+
+**Fix:** both headers now state what is true, including that the WebGPU draw
+path is unimplemented, and the parity harness has a real caller
+(`tests/e2e/render.spec.ts`) that makes its claim true rather than aspirational.
+GAP-002 and DV-001 now record that two things block WebGPU parity — missing
+hardware _and_ missing code — rather than only the first.
+
+**The check that would have caught both, and is now the habit:** before writing
+that something is wired, grep for its callers. Before writing that something is
+in the bundle, grep the emitted chunks. Both are one command.
+
+---
+
+## RC-0011 — The engine frame budget measured the rasteriser it claimed to exclude
+
+**Found by:** QA Automation at the P1 gate, by mutation. **Severity:** high.
+**Status:** fixed, with a stated residual limit.
+
+`playmode.cpuFrame.*` was offered in ADR-0015 as the CI-measurable substitute
+for a frame-rate budget that cannot be measured without a GPU. Its whole claim
+was that it is _"entirely about code in this repository, and fails when that
+code regresses"_. It did not.
+
+| Mutation                                             | Measured       | Verdict                              |
+| ---------------------------------------------------- | -------------- | ------------------------------------ |
+| baseline                                             | 2.50 – 3.90 ms | —                                    |
+| every system **3x** per fixed step                   | 3.80 ms        | **passed**, inside the baseline band |
+| every system **5x** per step                         | 5.30 ms        | **passed**                           |
+| scene-graph update **15x** per frame                 | 5.70 ms        | **passed**                           |
+| `MAX_PIXEL_RATIO` 2 → 1, **no engine change at all** | 2.50 → 1.40 ms | **−44%**                             |
+
+**The mechanism.** `cpuMs` was timed once per frame around
+`session.advance() + view.update()`. `advance()` runs `frameMs / stepMs` steps —
+so the amount of simulation inside every sample was set by how long the frame
+took, which in CI is set by SwiftShader. The rasterisation the budget was
+defined to exclude walked back in through the step count. The same device-pixel-
+ratio lever GAP-011 cites as proof that the _frame_ budget measures SwiftShader
+moved the supposedly-excluded budget by nearly half.
+
+Worse, and worth recording separately: the phone profile is throttled 6x against
+the tablet's 4x and measured **faster**. A more-constrained profile reading
+faster is the exact signal that exposed the P0 defect and caused P1-PRE to
+exist. It was present again, in a new budget, and nobody looked.
+
+**Fix.** Simulation and scene-graph update are timed separately, and the step
+count travels with them. The gate divides each cost by the work that produced it
+— a step costs what a step costs however many a frame affords, and an update
+happens exactly once per frame at any cadence — and reports the sum, which is
+what a frame would cost if the display ran at the simulation rate.
+
+**The residual limit, measured rather than assumed.** Repeating the DPR control
+against the new statistic moved it 25% rather than 44%. It is not zero and
+cannot be: `performance.now` is wall clock, and timing a main-thread section on
+a host whose rasteriser threads are saturated measures contention as well as
+work. No restructuring of the statistic removes that; only a per-thread CPU
+clock would, and browsers do not expose one.
+
+So the budget is sound as a **shippability bound** — 1.07 ms measured against an
+8 ms ceiling — and its resolution is stated rather than implied: **it cannot
+distinguish a regression smaller than about 30%.** A tighter regression detector
+needs the noise floor characterised on a quiet CI runner first, and is open work
+for P3, alongside RC-0008's harness.
+
+**Wider lesson.** ADR-0015 argued a deferral was legitimate _because_ a
+substitute budget covered what could still be covered. That argument is only as
+good as the substitute, and nothing had tested the substitute against a planted
+regression — the audit self-test was never extended past P0's eight detectors.
+A budget introduced to justify deferring another budget needs a planted
+regression on the day it lands, not on the day someone gets round to it.
+
+---
+
+## RC-0012 — The deferred budget could never have passed, on any hardware
+
+**Found by:** Performance at the P1 gate, with a positive control.
+**Severity:** high. **Status:** fixed.
+
+`playmode.fps.tablet.reference2d` was declared `min: 60`, deferred to P9 as
+DV-007, and defended in `real-config.test.ts` with a test named _"keeps the full
+60fps target rather than a relaxed one"_ — offered as evidence that deferring
+the measurement had not lowered the bar.
+
+The bar was not merely high. It was unreachable.
+
+The rate was derived from the 95th-percentile interval between
+`requestAnimationFrame` callbacks, and that interval is set by the compositor's
+60Hz frame source, not by the engine. Performance measured a `data:` page
+containing nothing but an empty rAF loop — no WebGL, no engine, no scene, no
+throttling, on a quiet host:
+
+```
+min 16.30   p05 16.50   median 16.70   p95 16.90   max 17.10 ms
+-> 1000 / 16.90 = 59.2 fps
+```
+
+**A budget no empty page can satisfy is not a demanding budget; it is a
+statistic the instrument cannot express a pass for.** Two consequences, and the
+second is worse than the first:
+
+1. The budget could only ever have failed, on a flawless device.
+2. GAP-011's manual procedure for closing DV-007 said _"confirm the p95
+   whole-frame duration is at or under 16.67ms"_. Run on a perfect iPad with a
+   60Hz display, that reads ~16.9ms and fails. **A deferral to a procedure that
+   cannot be discharged is a permanent hold recorded as a temporary one.**
+
+It also means ADR-0015's first evidence row — "desktop 1x, 1 entity, DPR1 →
+16.9ms p95 → 59.5 fps", presented as a measurement of the renderer under
+SwiftShader — is, to two decimal places, the empty-page vsync figure. The rows
+that carry the argument are all far above 16.67ms and are unaffected.
+
+**Fix.** The budget is now the **fraction of frames that missed a vsync**,
+capped at 5%, with a frame counted as missed past 1.5 refresh intervals. The
+target is unchanged: "60fps" means "does not drop frames at 60Hz", and this
+measures exactly that. What changed is that it can now be satisfied — the empty
+page drops none, and that run is committed as the statistic's positive control.
+
+**Wider lesson, and it generalises past this budget.** Every guard in this
+project is tested by planting a defect and checking it fires. Nothing was tested
+by checking it could _pass_. A gate needs both controls: a run that fails it and
+a run that does not. The negative control alone cannot distinguish "correctly
+strict" from "impossible", and impossible is the more expensive of the two,
+because it is discovered by whoever finally gets the hardware.
+
+---
+
+## RC-0013 — The canvas sized the container that sized the canvas
+
+**Found by:** the rotation test written to close RC-0009, on its first full run.
+**Severity:** medium. **Status:** fixed.
+
+`renderer.setSize(w, h, false)` — `updateStyle` off — leaves the canvas with no
+CSS size, so its **attribute** size becomes its intrinsic layout size. The
+editor shell's root is `min-height: 100%`, so it grows with its content, and the
+content was a canvas whose size was being set from the root's observed box.
+
+Rotating the phone profile walked the loop: root 390x844, rotate to 844x390,
+observer fires, backing store grows, canvas's intrinsic CSS size grows, root
+grows to fit it, observer fires again. It settled at a root **1827px tall inside
+a 390px viewport**, with the scene centred in the canvas and therefore entirely
+below the fold. The screenshot contained not one sprite pixel.
+
+**Fix.** `updateStyle` left on, so the canvas's CSS size is pinned in pixels to
+the box it was measured from; and play mode pins the root to `100dvh` with
+`overflow: hidden` while it owns it, so the container follows the viewport
+rather than its content. Either alone would break the cycle; both are correct
+independently.
+
+**Worth recording for one reason.** The `false` was deliberate and had a comment
+justifying it — avoiding a style write per resize. It was right about the cost
+and wrong about the consequence, and no amount of reading would have found it:
+the bug only exists when something _observes_ the container, which was true for
+about twenty minutes before the rotation test existed. The test written to close
+one finding found a second one on its first run, which is the argument for
+writing the test rather than reasoning about the code.

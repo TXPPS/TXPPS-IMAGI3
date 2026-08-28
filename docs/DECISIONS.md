@@ -574,12 +574,19 @@ guarantees one of them forgets).
 
 ### Decision
 
-`playmode.fps.tablet.reference2d` (60fps on the reference 2D scene, throttled
-tablet profile) **cannot be measured in this environment** and is deferred to P9
-as **DV-007** in the DEVICE-VERIFIED register, at its full value. In its place,
-`playmode.cpuFrame.{tablet,phone}.reference2d` is enforced from P1: the engine's
-own CPU work per frame — simulation plus scene-graph update, with rasterisation
-excluded — capped at 8ms.
+The reference scene's 60fps target **cannot be measured in this environment**
+and is deferred to P9 as **DV-007** in the DEVICE-VERIFIED register, at its full
+value. In its place, `playmode.cpuFrame.tablet.reference2d` is enforced from P1:
+the engine's own CPU work per 60Hz frame — one simulation step plus one
+scene-graph update and draw submission, with rasterisation excluded — capped at
+8ms.
+
+**This ADR was revised after the P1 gate review, and the revisions matter more
+than the original.** Three reviewers returned FAIL; two of the findings were
+against this decision directly. They are folded in below and recorded as
+RC-0011 and RC-0012 rather than quietly corrected, because the original version
+of this section made a claim about a substitute budget that measurement
+contradicted, and the shape of that mistake is the useful part.
 
 This is the only budget in the repository whose enforcement has been pushed
 past the phase the brief assigns it, and the conditions that make the deferral
@@ -609,6 +616,56 @@ The engine's own contribution, measured separately, is 2.5ms at the median on
 the same throttled tablet profile: **15% of a 60fps frame**. There is no reason
 to believe the engine misses the target on real hardware, and no way to
 demonstrate that here.
+
+### Two corrections from the P1 gate review
+
+**The deferred budget was unsatisfiable, not merely demanding.** It was stated
+as `min: 60` against a frame rate derived from the 95th-percentile interval
+between animation-frame callbacks. That interval is set by the compositor's
+60Hz frame source, and Performance measured an empty page — no engine, no
+WebGL, no scene — at a p95 of 16.90ms, which converts to **59.2fps**. No engine
+could ever have passed it, on any hardware, and GAP-011's manual procedure for
+closing DV-007 would have failed on a flawless iPad. It is now stated as the
+fraction of frames that missed a vsync, with a ceiling of 5%. The target is
+unchanged — "60fps" means "does not drop frames at 60Hz" — but it is now
+expressible, and the empty page is its positive control. See RC-0012.
+
+This also means the first row of the evidence table above is misattributed:
+"desktop 1x, 1 entity, DPR1 → 16.9ms" is the vsync figure, not a measurement of
+the renderer. The rows that carry the argument — the DPR2 and tablet rows, all
+far above 16.67ms — are unaffected, and Performance reproduced them
+independently.
+
+**The substitute budget did not measure engine cost.** It timed
+`advance() + update()` once per frame; `advance()` runs `frameMs / stepMs`
+steps, so the amount of simulation inside every sample was set by how long the
+frame took, which the rasteriser decides. Tripling the work in every system did
+not move it; halving the device pixel ratio, with the engine byte-for-byte
+identical, moved it 44%. It also excluded `renderer.render`, which is where
+three.js composes 400 world matrices — so the "scene-graph update" the budget
+named was on the excluded side, and the renderer's load-bearing design choice
+(one shared geometry and material rather than 400) was invisible to it.
+
+Both are fixed: costs are divided by the work that produced them, and
+submission is inside the boundary. Measured 4.66ms on the throttled tablet
+(0.26ms per step plus 4.40ms per frame). See RC-0011.
+
+### What this budget catches, and what it does not
+
+Stated as a range rather than a claim, because the original claim — "fails when
+that code regresses" — was contradicted by a planted regression:
+
+- **Caught:** anything that roughly doubles the engine's per-frame cost.
+- **Not caught:** a 3x regression confined to simulation, which is 5% of this
+  scene's engine frame cost. A budget on the total cannot see it.
+- **Not achievable here:** anything tighter. Run-to-run variance on the
+  sub-millisecond components is roughly 2x on this host, so a regression
+  detector below that is noise. It needs a quiet runner and is open work at P3.
+
+The `playmode.cpuFrame.phone.reference2d` budget was **removed**. It was not in
+the brief, and at 7.35ms against an 8ms ceiling its 9% margin would have flaked.
+A gate that fails at random teaches people to re-run it, which is worse than not
+having it.
 
 ### Why an engine-CPU budget rather than a relaxed frame rate
 

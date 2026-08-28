@@ -3,34 +3,35 @@
 <!-- Rewrite this file after every completed task. Prune aggressively. -->
 
 **Phase:** P1
-**Phase status:** P0 and P1-PRE closed. P1 code complete and green: core, runtime, renderer and play mode all landed, with `budgets.json` bumped to P1 so `runtime.bundle.gzip` and the play-mode frame budgets are enforced. Awaiting role sign-off.
+**Phase status:** P0 and P1-PRE closed. **P1 is OPEN and unsigned.** All three roles returned FAIL on pass 1 at `24ea825` — 22 blocking findings between them. Every one is addressed; pass 2 has not been reviewed. No role has signed, so P1 is not closed.
 
 <!-- The **Phase:** line above is a machine contract: a test requires it to
      match budgets.json currentPhase, so it must be one of the brief's phase
      ids. P1-PRE is a blocking sub-gate on the way to P1, not a phase, so it is
      recorded on the status line instead. -->
 
-**Tree status:** green — 616 unit tests, 51 E2E, `pnpm sweep` passes end to end
+**Tree status:** green — `pnpm sweep` passes end to end. Counts are in the sweep output, not here; this line said "616 unit tests, 51 E2E" while the tree ran 778 and 66, and two reviewers had to correct it.
 
 ## In flight
 
-**P1 is code complete and green.** Landed: the canonical serializer, fractional
-ordering keys, opaque ids, scene schema v1, the migration registry, the
-round-trip property test at 10,000 entities, deterministic graph repair with its
-convergence properties, the fuzz suite over the load boundary, the
-fixed-timestep runtime with its determinism gate, the three.js WebGL2 renderer,
-input abstraction, and play mode on a generated 400-sprite reference scene.
+P1 code is landed: core, runtime, renderer and play mode. Pass 1 was reviewed at
+`24ea825` and **all three roles returned FAIL** — 22 blocking findings. Every one
+is fixed; the fixes are unreviewed.
 
-Also landed, from the standing items: the claims ledger, the shell-edit ban, the
-guard audit, and raw-sample throttling provenance.
+The four that are worth reading before touching anything here, because each was
+a claim this project made that measurement contradicted:
+
+- **RC-0009** — deleting every draw call in the engine left 794 tests green.
+- **RC-0011** — the engine frame budget measured the rasteriser it excluded.
+- **RC-0012** — the deferred budget could never have passed, on any hardware.
+- **RC-0010** — two doc comments described code that did not exist.
 
 ## Next 3 actions
 
-1. **The P1 gate.** QA Automation, Visual QA and Performance each sign
-   independently in `docs/GATES.md`, from a detached worktree at a tagged
-   commit. Sign-off is a test artifact plus a table row, never a claim. The
-   thing to review hardest is ADR-0015: one budget's enforcement was pushed from
-   P1 to P9, and that is the move this project's own rules exist to catch.
+1. **Re-review P1.** Tag pass 2, run all three roles from detached worktrees,
+   and sign in `docs/GATES.md` — or do not. The table is there and empty.
+   Hardest thing to review: ADR-0015, which now defers one budget to P9 _and_
+   restates it, having been shown that the original could not be satisfied.
 2. **Asset resolution**, the one part of the P1 scope not built. Content
    addressing (`assets/<sha256>.<ext>` plus `asset-index.json`) is fixed by the
    brief; the runtime side is resolving a hash to bytes with a cache that does
@@ -39,9 +40,9 @@ guard audit, and raw-sample throttling provenance.
    metadata, with local storage explicitly a cache and cloud the source of
    truth.
 
-RC-0008 (`addEntity` is O(n²), and the editor is its only caller) is a **P3
-blocker** with a gate condition already written. It needs a harness, not a
-decision.
+Open work with gate conditions already written: **RC-0008** (`addEntity` is
+O(n²) and the editor is its only caller) and **RC-0011**'s tighter regression
+bound, both P3, both needing a harness rather than a decision.
 
 ## Notes for the next session
 
@@ -59,11 +60,15 @@ decision.
   audit table in docs/GATES.md applies it to every detector in the tree. Two
   failed it. Read that table before adding a check, and record a new guard in
   it.
-- **A documented code change must name its commit** as a `file:` claim, and
-  `pnpm verify:claims` fails the build when the commit does not touch the path.
-  Shell-based source edits (`sed -i`, heredoc redirects) are banned by a lint
-  check, because they cannot report that they changed nothing — the mechanism
-  behind RC-0005.
+- **A documented code change must name its commit**, either as a `file:` claim
+  or as a commit and a source path in the same sentence. `pnpm verify:claims`
+  fails the build when the commit does not touch the path, and scans every
+  markdown file in the repository. Shell-based source edits are banned by a lint
+  check, because they cannot report that they changed nothing — RC-0005.
+- **A gate needs both controls.** Every guard here was tested by planting a
+  defect and checking it fires; none was tested by checking it can pass. That is
+  how a budget nothing could ever satisfy sat in `budgets.json` defended by a
+  test asserting it had not been relaxed. RC-0012.
 - **Prefer generated cases over chosen ones for anything with an invariant.**
   Three defects in landed code were found by property and fuzz tests and by
   nothing else: the fractional index emitting `0`, the quadratic `addEntity`,
