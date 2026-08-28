@@ -27,6 +27,14 @@ export default defineConfig({
       },
       {
         test: {
+          ...NODE_TEST_DEFAULTS,
+          name: 'repo',
+          root: './tools/repo',
+          include: ['test/**/*.test.ts'],
+        },
+      },
+      {
+        test: {
           name: 'editor',
           root: './apps/editor',
           environment: 'jsdom',

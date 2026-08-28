@@ -5,6 +5,9 @@
       "path": "./tools/audit"
     },
     {
+      "path": "./tools/repo"
+    },
+    {
       "path": "./apps/editor"
     },
     {
