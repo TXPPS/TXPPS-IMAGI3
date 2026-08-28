@@ -119,8 +119,8 @@ const SCENARIOS: readonly DetectorScenario[] = [
   },
   {
     detector: 'screenshot comparator',
-    plantedDefect: 'diffuse colour drift over 0.93% of pixels (pixel-ratio gate alone)',
-    // Measured: 0.9307% differing, mean SSIM 0.99777, 0.0000% damaged windows.
+    plantedDefect: 'diffuse colour drift over 0.87% of pixels (pixel-ratio gate alone)',
+    // Measured: 0.8682% differing, mean SSIM 0.99791, 0.0000% damaged windows.
     // Only the differing-pixel ratio can catch this.
     clean: () => compareImages(FRAME, FRAME, PARITY_THRESHOLDS).ok,
     planted: () => compareImages(FRAME, withScatteredShift(FRAME, 108, 40), PARITY_THRESHOLDS).ok,

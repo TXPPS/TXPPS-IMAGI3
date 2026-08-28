@@ -66,7 +66,14 @@ test.describe('planted faults', () => {
       result?.status,
       `slow boot took ${elapsedMs.toFixed(0)}ms and must breach the budget`,
     ).toBe('violated');
-    expect(report.ok).toBe(false);
+
+    // The clean counterpart. `report.ok` is NOT asserted here: checking a
+    // single measurement leaves the other enforced budgets unmeasured, so the
+    // report is not-ok regardless of the planted fault and asserting it would
+    // pass no matter what. Re-checking the same rule with a plausible value is
+    // what actually proves the checker responds to the value.
+    const control = checkBudgets(loadBudgets(), [{ id: budgetId, value: 25 }]);
+    expect(control.results.find((r) => r.rule.id === budgetId)?.status).toBe('passed');
   });
 
   test('a clean page passes the same guards it just failed', async ({ page, incidents }) => {

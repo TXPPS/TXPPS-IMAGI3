@@ -127,3 +127,35 @@ fixture. The failure was the system working.
 twice. The durable fix is for CI to invoke `pnpm sweep` directly once the suite
 is slow enough to justify the job split differently; recorded here rather than
 done now, because the current split gives faster feedback on static analysis.
+
+### RC-0005 — Edits reported as applied that silently did nothing
+
+**Found:** P0, by the QA Automation re-verification.
+**Severity:** P1 (a defect stayed in the tree while the record said it was fixed).
+
+Two source edits and two documentation edits were written as exact-string
+replacements. In each case the formatter had reflowed the surrounding lines
+between the moment the anchor text was read and the moment the replacement ran,
+so the anchor no longer matched and the replacement did nothing. Nothing failed,
+because a string replacement that matches nothing is not an error.
+
+The consequences were worse than the missing edits:
+
+- A vacuous assertion in `tests/e2e/planted-fault.spec.ts` — one that passes
+  regardless of the fault it claims to detect — stayed in the tree while both
+  `docs/GATES.md` and a commit message recorded it as fixed.
+- The sign-off rows in `docs/GATES.md` continued to read PASS after being
+  "changed" to PENDING, and that stale PASS was then quoted to the reviewer as
+  evidence that the row was pending.
+
+**Cause:** a write that cannot fail, used for an edit that can. The formatter
+runs between edits, so any anchor captured before a format pass is unreliable.
+
+**Fix:** every scripted replacement now asserts its anchor matched before
+writing, so a stale anchor is a loud failure instead of a silent no-op. Where a
+target is a formatted table row, the edit matches the row by its leading cell
+rather than by exact whitespace.
+
+**Prevention:** re-read the region after an edit that matters, and never report
+an edit as applied on the strength of the command having exited zero. The
+review caught this; the tooling should have.

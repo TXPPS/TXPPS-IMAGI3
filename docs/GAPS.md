@@ -87,6 +87,20 @@ fail the gate with no real regression present.
   pixel" even means, so the brief's "0.5% differing pixels" is only as
   well-defined as this number.
 
+**What the damaged-window threshold buys today**, measured by fully erasing
+squares of increasing size until the baseline gate fires:
+
+| Profile               | SSIM windows | Damaged windows tolerated | Smallest wipe detected        |
+| --------------------- | ------------ | ------------------------- | ----------------------------- |
+| desktop 1440x900 DPR1 | 80,416       | 40                        | 24 x 24 device px = 24 CSS px |
+| tablet 1200x800 DPR2  | 239,001      | 119                       | 40 x 40 device px = 20 CSS px |
+| phone 390x844 DPR3    | 184,544      | 92                        | 40 x 40 device px = 13 CSS px |
+
+All three are below the 44 CSS px minimum interactive target, so the gate
+detects the disappearance of any element at or above that size on every
+profile. Whoever recalibrates at P3 should know what regression size a looser
+threshold trades away.
+
 **Procedure to close (do this when starting P3):**
 
 1. Run the E2E suite inside `mcr.microsoft.com/playwright:v1.56.1-noble`, the

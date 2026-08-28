@@ -3,12 +3,12 @@
 <!-- Rewrite this file after every completed task. Prune aggressively. -->
 
 **Phase:** P0 — Foundation
-**Phase status:** implementation complete; Visual QA and Performance signed off, QA Automation re-verification outstanding (docs/GATES.md)
+**Phase status:** complete — all three mandatory roles signed independently (docs/GATES.md)
 **Tree status:** green — `pnpm sweep` passes end to end
 
 ## In flight
 
-Nothing. P0 closed; P1 not started.
+Nothing. P0 is closed and signed; P1 has not started.
 
 ## Next 3 actions
 

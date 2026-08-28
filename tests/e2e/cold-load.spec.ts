@@ -4,7 +4,7 @@ import { recordMeasurements, ruleFor } from './budget.ts';
 import { expect, test } from './fixtures.ts';
 import { installIncidentCapture } from './incidents.ts';
 
-/** Samples per profile. An odd count so the median is an observed value. */
+/** Samples per profile; the gate takes the worst of them. */
 const SAMPLE_COUNT = 3;
 
 interface LoadTimings {
@@ -39,11 +39,18 @@ function coldLoadMs(timings: LoadTimings): number {
   return Math.max(timings.readyMs, timings.firstContentfulPaintMs);
 }
 
-function median(values: readonly number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  const value = sorted[middle];
-  if (value === undefined) throw new Error('cannot take the median of an empty sample set');
+/**
+ * The worst sample, not the median.
+ *
+ * A median suppresses the tail rather than exposing it — samples of
+ * 20/20/3000 ms report 20 — which is the wrong direction for a gate whose job
+ * is catching regressions. Three samples cannot estimate a percentile, so the
+ * conservative reduction is the right one until there is enough signal to do
+ * something more careful.
+ */
+function worst(values: readonly number[]): number {
+  const value = Math.max(...values);
+  if (!Number.isFinite(value)) throw new Error('cannot reduce an empty sample set');
   return value;
 }
 
@@ -80,7 +87,7 @@ test.describe('cold load', () => {
     for (let i = 0; i < SAMPLE_COUNT; i += 1) {
       samples.push(await sampleColdLoad(page, incidents));
     }
-    const elapsedMs = median(samples);
+    const elapsedMs = worst(samples);
 
     const budgetId = `editor.coldLoad.${profile.id}`;
     const rule = ruleFor(budgetId);
@@ -93,7 +100,7 @@ test.describe('cold load', () => {
       {
         id: budgetId,
         value: elapsedMs,
-        origin: `tests/e2e/cold-load.spec.ts median of ${String(SAMPLE_COUNT)}`,
+        origin: `tests/e2e/cold-load.spec.ts worst of ${String(SAMPLE_COUNT)}`,
       },
     ]);
 
