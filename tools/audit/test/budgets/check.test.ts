@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { checkBudgets, findOrphanMeasurements } from '../../src/budgets/check.ts';
+import {
+  checkBudgets,
+  findOrphanMeasurements,
+  requiredThrottleRatio,
+} from '../../src/budgets/check.ts';
 import type { BudgetDocument, BudgetRule } from '../../src/budgets/types.ts';
 
 function rule(overrides: Partial<BudgetRule> = {}): BudgetRule {
@@ -155,5 +159,64 @@ describe('throttling evidence', () => {
     const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50 }]);
     expect(report.counts.unthrottled).toBe(1);
     expect(report.counts.passed).toBe(0);
+  });
+});
+
+/**
+ * The floor is derived, not chosen, and the derivation is the argument:
+ * a throttled budget can only catch something the unthrottled budget misses
+ * when the slowdown exceeds the ratio between their ceilings. Below that it is
+ * strictly dominated, which is ADR-0011's disqualifying condition.
+ */
+describe('requiredThrottleRatio', () => {
+  const unthrottled = rule({
+    id: 'ci-headless.demo',
+    scope: 'desktop',
+    max: 3000,
+    unit: 'ms',
+  });
+
+  it('derives the floor from the ratio between the two ceilings', () => {
+    const throttled = rule({ id: 'demo.tablet', scope: 'tablet', max: 9000, unit: 'ms' });
+    expect(requiredThrottleRatio(throttled, [unthrottled, throttled])).toBe(3);
+  });
+
+  it('never falls below the point where the budget stops being able to fail', () => {
+    // A throttled ceiling equal to the unthrottled one would derive 1.0x, at
+    // which the budget can catch nothing the unthrottled one misses.
+    const throttled = rule({ id: 'demo.tablet', scope: 'tablet', max: 3000, unit: 'ms' });
+    expect(requiredThrottleRatio(throttled, [unthrottled, throttled])).toBe(2);
+  });
+
+  it('falls back to the default when there is no unthrottled counterpart', () => {
+    const throttled = rule({ id: 'demo.tablet', scope: 'tablet', max: 6000, unit: 'ms' });
+    expect(requiredThrottleRatio(throttled, [throttled])).toBe(2);
+  });
+
+  it('matches the committed budgets: 6000ms over 3000ms is 2.0x', () => {
+    const throttled = rule({ id: 'demo.tablet', scope: 'tablet', max: 6000, unit: 'ms' });
+    expect(requiredThrottleRatio(throttled, [unthrottled, throttled])).toBe(2);
+  });
+
+  it('rejects a ratio a flat fraction of the requested rate would have accepted', () => {
+    // 0.4 of a requested 4x gave 1.6x, and runs recording 1.70x and 1.79x
+    // passed while carrying no independent signal at all.
+    const throttled = rule({ id: 'demo.tablet', scope: 'tablet', max: 6000, unit: 'ms' });
+    const doc = { currentPhase: 'P0' as const, rules: [unthrottled, throttled] };
+    const report = checkBudgets(doc, [
+      { id: 'ci-headless.demo', value: 100 },
+      { id: 'demo.tablet', value: 100, throttleRatio: 1.79 },
+    ]);
+    expect(report.results.find((r) => r.rule.id === 'demo.tablet')?.status).toBe('unthrottled');
+  });
+
+  it('accepts a ratio at the derived floor', () => {
+    const throttled = rule({ id: 'demo.tablet', scope: 'tablet', max: 6000, unit: 'ms' });
+    const doc = { currentPhase: 'P0' as const, rules: [unthrottled, throttled] };
+    const report = checkBudgets(doc, [
+      { id: 'ci-headless.demo', value: 100 },
+      { id: 'demo.tablet', value: 100, throttleRatio: 2 },
+    ]);
+    expect(report.results.find((r) => r.rule.id === 'demo.tablet')?.status).toBe('passed');
   });
 });

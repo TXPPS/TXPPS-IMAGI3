@@ -209,3 +209,22 @@ edit that introduces the defect. Ask not "does this check fire when I break the
 thing" but "does this check survive an edit that removes both the thing and the
 check". Assertions about an artifact survive that; assertions inside a helper do
 not.
+
+**Which guard covers which failure**, because "three layers" is not a plan
+unless each layer's scope is stated:
+
+| Failure                                                        | Caught by                                                                                                                                                                                                                |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A page is measured that nobody throttled                       | The spec demands a throttling record of the page it measured; absence fails there.                                                                                                                                       |
+| Throttling is requested but does not take effect               | The page-level verification measures the same workload before and after and throws when the slowdown does not arrive.                                                                                                    |
+| A measurement reaches the gate with no evidence, or too little | The budget gate's `unthrottled` status, in a different module and a different process from anything that produced it.                                                                                                    |
+| The declared rate is meaningless (a profile set to 1x)         | _Not_ the evidence check, which exempts unthrottled profiles by design. Covered by the naming-honesty test and the ordering gate.                                                                                        |
+| The evidence itself is fabricated                              | Nothing. A number in a JSON file cannot attest itself. This is the floor of artifact checking, and the honest statement is that forging it now takes deliberate edits in three files rather than one plausible omission. |
+
+The stronger bound available, recorded for when the app is substantial enough
+to support it: assert the cross-profile relation on the budget artifacts
+themselves — the tablet's cold load over the unthrottled profile's must exceed
+the same 2.0x — because those are independently produced timings rather than a
+self-reported field. It is not a gate today because cold load on a near-empty
+shell is dominated by fixed overhead that throttling does not touch, so the
+ratio would measure the harness rather than the app.

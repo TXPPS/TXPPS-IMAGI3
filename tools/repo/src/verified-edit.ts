@@ -105,6 +105,14 @@ export function editFile(path: string, replacements: readonly Replacement[]): Ed
     intended = next;
   });
 
+  // Both checks are needed, and dropping this one in favour of the
+  // per-replacement check above was a regression: replacements can each change
+  // the text and still cancel out, as in a rename followed by its inverse. That
+  // batch writes byte-identical output and would otherwise report success.
+  if (intended === before) {
+    throw new EditError(`${path}: the replacements cancel out; the file is unchanged`);
+  }
+
   writeFileSync(path, intended);
   verifyOnDisk(path, intended);
 

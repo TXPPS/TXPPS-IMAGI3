@@ -198,3 +198,31 @@ describe('editFile rejects replacements that cannot do anything', () => {
     expect(outcome.lengthAfter).toBe(outcome.lengthBefore);
   });
 });
+
+/**
+ * Found by review: adding the per-replacement check and removing the batch
+ * check traded a working guard for an unreachable one. Replacements can each
+ * change the text and still cancel out, writing a byte-identical file while
+ * reporting success. Both checks are cheap; both stay.
+ */
+describe('editFile rejects a batch that cancels itself out', () => {
+  it('refuses a rename followed by its inverse', () => {
+    const path = fixture('ALPHA beta\n');
+    expect(() =>
+      editFile(path, [
+        { find: 'ALPHA', replace: 'TEMPORARY' },
+        { find: 'TEMPORARY', replace: 'ALPHA' },
+      ]),
+    ).toThrow(/cancel out/);
+    expect(readFileSync(path, 'utf8')).toBe('ALPHA beta\n');
+  });
+
+  it('still accepts a batch whose replacements compose to a real change', () => {
+    const path = fixture('ALPHA beta\n');
+    editFile(path, [
+      { find: 'ALPHA', replace: 'TEMPORARY' },
+      { find: 'TEMPORARY', replace: 'GAMMA' },
+    ]);
+    expect(readFileSync(path, 'utf8')).toBe('GAMMA beta\n');
+  });
+});

@@ -1,5 +1,6 @@
 import { isPhaseAtLeast } from '../phases.ts';
 import { DEVICE_PROFILES, isDeviceProfileId } from '../profiles.ts';
+import { isCiHeadlessBudget } from './ids.ts';
 import {
   BUDGET_STATUSES,
   type BudgetDocument,
@@ -15,34 +16,75 @@ function formatValue(value: number, rule: BudgetRule): string {
 }
 
 /**
- * Fraction of a profile's requested throttling a measurement must show.
+ * Throttling a device-scoped budget must show to be worth having.
  *
- * Matches the presence-check threshold the browser harness applies. This is
- * the artifact-level half of the same guarantee: the harness proves throttling
- * on the page, and this proves the recorded number came from such a page.
+ * Derived, not chosen. For a regression of unthrottled size W, the unthrottled
+ * budget passes it when W is under that ceiling, and the throttled budget
+ * catches it when W times the slowdown exceeds the throttled ceiling. A W
+ * satisfying both exists only when the slowdown exceeds the ratio between the
+ * two ceilings.
+ *
+ * With a 3000ms unthrottled ceiling and a 6000ms throttled one, that is 2.0x.
+ * Below it the throttled budget is strictly dominated: it cannot fail for
+ * anything the unthrottled budget would not have caught first, which is
+ * ADR-0011's own disqualifying condition. A flat fraction of the *requested*
+ * rate misses this — 0.4 of a requested 4x gives 1.6x, and runs recording 1.70x
+ * and 1.79x passed while carrying no independent signal at all.
  */
-const MIN_RECORDED_THROTTLE_FRACTION = 0.4;
+const DEFAULT_MIN_THROTTLE_RATIO = 2;
+
+function unthrottledCounterpart(
+  rule: BudgetRule,
+  rules: readonly BudgetRule[],
+): number | undefined {
+  const counterpart = rules.find(
+    (candidate) =>
+      isCiHeadlessBudget(candidate.id) &&
+      candidate.unit === rule.unit &&
+      candidate.max !== undefined,
+  );
+  return counterpart?.max;
+}
+
+/** The slowdown a rule's measurement must evidence for the rule to mean anything. */
+export function requiredThrottleRatio(rule: BudgetRule, rules: readonly BudgetRule[]): number {
+  const unthrottledCeiling = unthrottledCounterpart(rule, rules);
+  if (unthrottledCeiling === undefined || rule.max === undefined || unthrottledCeiling <= 0) {
+    return DEFAULT_MIN_THROTTLE_RATIO;
+  }
+  return Math.max(DEFAULT_MIN_THROTTLE_RATIO, rule.max / unthrottledCeiling);
+}
 
 /**
  * A device-scoped budget measured without throttling is not a lenient result,
  * it is a meaningless one — which is how an entire gate once shipped with every
  * device-named budget measured at full desktop speed while the throttling
  * self-test stayed green on a different page. See RC-0006.
+ *
+ * What this proves and what it does not: it proves the declared rate reached
+ * the page that was measured. It cannot prove the declaration is meaningful —
+ * a profile declaring rate 1 is exempt here, and is covered instead by the
+ * naming-honesty test and the ordering gate. Nor can it distinguish a measured
+ * ratio from a hand-written one; that is the floor of artifact checking.
  */
-function checkThrottlingEvidence(rule: BudgetRule, measurement: Measurement): string | undefined {
+function checkThrottlingEvidence(
+  rule: BudgetRule,
+  measurement: Measurement,
+  rules: readonly BudgetRule[],
+): string | undefined {
   if (!isDeviceProfileId(rule.scope)) return undefined;
   const expected = DEVICE_PROFILES[rule.scope].cpuThrottlingRate;
   if (expected <= 1) return undefined;
 
-  const required = expected * MIN_RECORDED_THROTTLE_FRACTION;
+  const required = requiredThrottleRatio(rule, rules);
   const observed = measurement.throttleRatio;
   if (observed === undefined) {
     return `scoped to ${rule.scope} (throttled ${String(expected)}x) but the measurement records no throttleRatio`;
   }
   if (!Number.isFinite(observed) || observed < required) {
     return (
-      `measured at ${String(observed)}x CPU throttling, below the ${required.toFixed(2)}x ` +
-      `required for a budget scoped to ${rule.scope}`
+      `measured at ${String(observed)}x CPU throttling, below the ${required.toFixed(2)}x this ` +
+      `budget needs to catch anything the unthrottled budget would not catch first`
     );
   }
   return undefined;
@@ -102,7 +144,7 @@ function evaluateRule(
       detail: `harness reported a non-finite value (${String(measurement.value)})`,
     };
   }
-  const throttleProblem = checkThrottlingEvidence(rule, measurement);
+  const throttleProblem = checkThrottlingEvidence(rule, measurement, document.rules);
   if (throttleProblem !== undefined) {
     return {
       rule,

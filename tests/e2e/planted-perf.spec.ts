@@ -4,12 +4,13 @@ import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import {
   COLD_LOAD_BUDGET_IDS,
+  DEVICE_PROFILES,
   checkBudgets,
   type BudgetStatus,
   type DeviceProfileId,
 } from '@imagi3/audit';
 import { READY_ATTRIBUTE, READY_MARK } from '../../apps/editor/src/constants.ts';
-import { loadBudgets } from './budget.ts';
+import { loadBudgets, ruleFor } from './budget.ts';
 import { DEV_BASE_URL } from './config.ts';
 import { expect, test } from './fixtures.ts';
 import {
@@ -64,12 +65,41 @@ const EXPECTED_STATUS: Readonly<Record<DeviceProfileId, BudgetStatus>> = {
  * by the unthrottled ceiling. The target is the geometric middle, which leaves
  * equal proportional headroom on both sides.
  */
-const UNTHROTTLED_CEILING_MS = 3000;
-const THROTTLED_CEILING_MS = 6000;
-const NOMINAL_TABLET_RATE = 4;
+function ceilingFor(profileId: DeviceProfileId): number {
+  const ceiling = ruleFor(COLD_LOAD_BUDGET_IDS[profileId]).max;
+  if (ceiling === undefined) {
+    throw new Error(`${COLD_LOAD_BUDGET_IDS[profileId]} declares no max to size against`);
+  }
+  return ceiling;
+}
 
-function targetWorkloadMs(): number {
-  return Math.sqrt((THROTTLED_CEILING_MS / NOMINAL_TABLET_RATE) * UNTHROTTLED_CEILING_MS);
+/**
+ * Size the workload from the slowdown actually observed, not the nominal rate.
+ *
+ * Ceilings are read from budgets.json rather than restated, and the slowdown
+ * comes from this run's measurement. Using the nominal rate where a measured
+ * one is in hand left the tablet leg with 1.18x headroom on a run whose
+ * achieved throttling was 2.75x rather than 4x — a guess with a table beside
+ * it, which is the pattern this phase exists to remove.
+ */
+function targetWorkloadMs(observedTabletRatio: number): number {
+  const unthrottledCeiling = ceilingFor('desktop');
+  const throttledCeiling = ceilingFor('tablet');
+  return Math.sqrt((throttledCeiling / observedTabletRatio) * unthrottledCeiling);
+}
+
+/**
+ * The tablet's slowdown as seen from whichever profile is running.
+ *
+ * Every profile must plant the same workload for the contrast to mean
+ * anything, so a profile that is not the tablet scales its own observation by
+ * the ratio of the declared rates.
+ */
+function tabletRatioFrom(profileId: DeviceProfileId, observed: number): number {
+  const own = DEVICE_PROFILES[profileId].cpuThrottlingRate;
+  const tablet = DEVICE_PROFILES.tablet.cpuThrottlingRate;
+  if (own <= 1) return tablet;
+  return (observed * tablet) / own;
 }
 
 async function loadWith(page: Page, query: string): Promise<void> {
@@ -96,7 +126,8 @@ test.describe('planted CPU regression', () => {
     incidents,
     throttle,
   }) => {
-    const iterations = Math.round(targetWorkloadMs() / throttle.msPerIteration);
+    const tabletRatio = tabletRatioFrom(profile.id, throttle.observedRatio);
+    const iterations = Math.round(targetWorkloadMs(tabletRatio) / throttle.msPerIteration);
     await loadWith(page, `?plant=cpu-regression&iterations=${String(iterations)}`);
     const elapsedMs = await readReadyMs(page);
 
@@ -111,7 +142,8 @@ test.describe('planted CPU regression', () => {
       `${profile.label} (CPU rate ${String(profile.cpuThrottlingRate)}x, measured ` +
         `${throttle.observedRatio.toFixed(2)}x) loaded in ${(elapsedMs / 1000).toFixed(2)}s ` +
         `against ${budgetId}, workload ${String(iterations)} iterations sized for ` +
-        `${targetWorkloadMs().toFixed(0)}ms unthrottled on this host`,
+        `${targetWorkloadMs(tabletRatio).toFixed(0)}ms unthrottled at an inferred ` +
+        `tablet slowdown of ${tabletRatio.toFixed(2)}x`,
     ).toBe(EXPECTED_STATUS[profile.id]);
 
     // The regression is purely temporal, so no other detector should see it.
@@ -119,7 +151,10 @@ test.describe('planted CPU regression', () => {
   });
 
   test('is invisible to the screenshot comparator', async ({ page, profile, throttle }) => {
-    const iterations = Math.round(targetWorkloadMs() / throttle.msPerIteration);
+    const iterations = Math.round(
+      targetWorkloadMs(tabletRatioFrom(profile.id, throttle.observedRatio)) /
+        throttle.msPerIteration,
+    );
     const path = baselinePath(mkdtempSync(join(tmpdir(), 'imagi3-perf-')), profile, 'clean');
 
     await loadWith(page, '');

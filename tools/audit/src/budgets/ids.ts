@@ -25,3 +25,21 @@ export const CI_HEADLESS_PREFIX = 'ci-headless.';
 export function isCiHeadlessBudget(id: string): boolean {
   return id.startsWith(CI_HEADLESS_PREFIX);
 }
+
+/**
+ * Budget ids that name a device profile without the ci-headless prefix.
+ *
+ * A budget id naming a device asserts a device claim, so an id naming an
+ * unthrottled profile is a claim the harness cannot support. Pure over an id
+ * list so it can be tested against planted ids rather than only against a
+ * clean budget file, where every detector passes by having nothing to find.
+ */
+export function findBudgetsNamingProfile(
+  ids: readonly string[],
+  profileId: DeviceProfileId,
+): string[] {
+  return ids.filter((id) => {
+    if (isCiHeadlessBudget(id)) return false;
+    return id.split('.').includes(profileId);
+  });
+}

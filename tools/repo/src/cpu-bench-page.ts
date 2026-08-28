@@ -65,12 +65,16 @@ export async function applyCpuThrottling(page: Page, rate: number): Promise<void
 /**
  * Probe size for throttle verification.
  *
- * Sized for roughly 40ms unthrottled, not less. CDP throttling works by making
- * the renderer sleep periodically, so a probe short enough to fall between
- * those pauses reports a ratio far below the real one: an 8M-iteration probe
- * measured 2.57x for a requested 6x and failed a correctly throttled page.
+ * CDP throttling works by making the renderer sleep periodically, so a probe
+ * short enough to fall between those pauses under-reports the slowdown badly:
+ * an 8M-iteration probe measured 2.57x for a requested 6x and failed a
+ * correctly throttled page, and a 30M probe read 2.75x on a page whose planted
+ * workload was simultaneously experiencing 3.98x.
+ *
+ * Sized for roughly 100ms unthrottled, which spans enough sleep cycles for the
+ * ratio to be a fair estimate rather than a sample of one duty cycle.
  */
-export const THROTTLE_VERIFY_ITERATIONS = 30_000_000;
+export const THROTTLE_VERIFY_ITERATIONS = 80_000_000;
 
 /**
  * Samples per side of the verification.

@@ -13,7 +13,7 @@
     },
     {
       "id": "editor.coldLoad.tablet",
-      "description": "Editor cold load to interactive on a warm cache, tablet profile under 4x CPU throttling (measured 4.1x-4.8x). Throttled emulation, not tablet hardware.",
+      "description": "Editor cold load to interactive on a warm cache, tablet profile under 4x requested CPU throttling. Throttled emulation, not tablet hardware. The slowdown actually achieved varies by host and contention and is recorded per measurement as throttleRatio; the gate rejects a measurement whose evidence falls below the ratio this ceiling needs to be meaningful.",
       "unit": "ms",
       "scope": "tablet",
       "max": 6000,
@@ -23,7 +23,7 @@
     },
     {
       "id": "editor.coldLoad.phone",
-      "description": "Editor cold load to interactive on a warm cache, phone profile under 6x CPU throttling (measured 6.5x-6.8x). Throttled emulation, not phone hardware.",
+      "description": "Editor cold load to interactive on a warm cache, phone profile under 6x requested CPU throttling. Throttled emulation, not phone hardware. The slowdown actually achieved varies by host and contention and is recorded per measurement as throttleRatio; the gate rejects a measurement whose evidence falls below the ratio this ceiling needs to be meaningful.",
       "unit": "ms",
       "scope": "phone",
       "max": 6000,

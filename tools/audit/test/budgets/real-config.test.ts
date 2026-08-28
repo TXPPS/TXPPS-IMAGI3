@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { COLD_LOAD_BUDGET_IDS, isCiHeadlessBudget } from '../../src/budgets/ids.ts';
+import {
+  COLD_LOAD_BUDGET_IDS,
+  findBudgetsNamingProfile,
+  isCiHeadlessBudget,
+} from '../../src/budgets/ids.ts';
 import { parseBudgetDocument } from '../../src/budgets/load.ts';
 import { PHASE_ORDER, isPhaseId } from '../../src/phases.ts';
 import { DEVICE_PROFILES } from '../../src/profiles.ts';
@@ -28,25 +32,32 @@ function rule(id: string): BudgetRule {
  * effectively as deleting it, and would otherwise be a one-word edit nothing
  * complains about.
  */
-const MANDATED: readonly (readonly [string, 'max' | 'min', number, string])[] = [
-  ['ci-headless.editor.coldLoad', 'max', 3_000, 'P0'],
-  ['editor.coldLoad.tablet', 'max', 6_000, 'P0'],
-  ['editor.coldLoad.phone', 'max', 6_000, 'P0'],
-  ['editor.bundle.gzip', 'max', 5_000_000, 'P0'],
-  ['runtime.bundle.gzip', 'max', 1_500_000, 'P1'],
-  ['playmode.fps.tablet.reference2d', 'min', 60, 'P1'],
-  ['editor.frameSpike.max', 'max', 32, 'P3'],
-  ['soak.heapGrowth.ratio', 'max', 1.1, 'P3'],
-  ['playmode.fps.phone.reference3d', 'min', 30, 'P6'],
-  ['playmode.heap.peak.phone', 'max', 500_000_000, 'P6'],
-  ['gpu.texture.phone', 'max', 256_000_000, 'P6'],
+const MANDATED: readonly (readonly [string, 'max' | 'min', number, string, string])[] = [
+  ['ci-headless.editor.coldLoad', 'max', 3_000, 'P0', 'desktop'],
+  ['editor.coldLoad.tablet', 'max', 6_000, 'P0', 'tablet'],
+  ['editor.coldLoad.phone', 'max', 6_000, 'P0', 'phone'],
+  ['editor.bundle.gzip', 'max', 5_000_000, 'P0', 'all'],
+  ['runtime.bundle.gzip', 'max', 1_500_000, 'P1', 'all'],
+  ['playmode.fps.tablet.reference2d', 'min', 60, 'P1', 'tablet'],
+  ['editor.frameSpike.max', 'max', 32, 'P3', 'all'],
+  ['soak.heapGrowth.ratio', 'max', 1.1, 'P3', 'all'],
+  ['playmode.fps.phone.reference3d', 'min', 30, 'P6', 'phone'],
+  ['playmode.heap.peak.phone', 'max', 500_000_000, 'P6', 'phone'],
+  ['gpu.texture.phone', 'max', 256_000_000, 'P6', 'phone'],
 ];
 
 describe('the committed budgets.json', () => {
-  it.each(MANDATED)('pins %s %s at %d, enforced from %s', (id, bound, value, phase) => {
-    expect(rule(id)[bound]).toBe(value);
-    expect(rule(id).enforcedFrom).toBe(phase);
-  });
+  it.each(MANDATED)(
+    'pins %s %s at %d, enforced from %s, scoped to %s',
+    (id, bound, value, phase, scope) => {
+      expect(rule(id)[bound]).toBe(value);
+      expect(rule(id).enforcedFrom).toBe(phase);
+      // Scope is load-bearing, not decorative: widening a device-scoped budget
+      // to "all" exempts it from the throttling-evidence check entirely, which
+      // is a one-word edit that would otherwise pass unremarked.
+      expect(rule(id).scope).toBe(scope);
+    },
+  );
 
   it('declares no rules beyond those pinned here', () => {
     expect([...byId.keys()].sort()).toEqual(MANDATED.map(([id]) => id).sort());
@@ -121,9 +132,10 @@ describe('device naming honesty', () => {
     for (const [profileId, profile] of Object.entries(DEVICE_PROFILES)) {
       if (profile.cpuThrottlingRate > 1) continue;
       checked += 1;
-      const named = document.rules.filter(
-        (r) => r.id.includes(`.${profileId}`) && !isCiHeadlessBudget(r.id),
-      );
+      const named = findBudgetsNamingProfile(
+        document.rules.map((r) => r.id),
+        profileId as keyof typeof DEVICE_PROFILES,
+      ).map((id) => ({ id }));
       expect(
         named.map((r) => r.id),
         `${profileId} is unthrottled, so a budget named after it would claim a device signal it does not have`,
@@ -138,5 +150,41 @@ describe('device naming honesty', () => {
         true,
       );
     }
+  });
+});
+
+/**
+ * Positive controls for the device-naming detector. A review found this guard
+ * had none: gutting its filter expression left the suite green, because a clean
+ * budget file gives it nothing to find. It was load-bearing against real
+ * regressions, but nothing pinned the expression itself.
+ */
+describe('findBudgetsNamingProfile', () => {
+  it('flags a budget named after a profile', () => {
+    expect(findBudgetsNamingProfile(['editor.coldLoad.desktop'], 'desktop')).toEqual([
+      'editor.coldLoad.desktop',
+    ]);
+  });
+
+  it('flags a profile name in any segment, not only the last', () => {
+    expect(findBudgetsNamingProfile(['desktop.editor.coldLoad'], 'desktop')).toEqual([
+      'desktop.editor.coldLoad',
+    ]);
+  });
+
+  it('exempts an id that admits it is ci-headless', () => {
+    expect(findBudgetsNamingProfile(['ci-headless.editor.coldLoad'], 'desktop')).toEqual([]);
+  });
+
+  it('does not flag a different profile', () => {
+    expect(findBudgetsNamingProfile(['editor.coldLoad.tablet'], 'desktop')).toEqual([]);
+  });
+
+  it('does not flag a substring that is not its own segment', () => {
+    expect(findBudgetsNamingProfile(['editor.desktopish.coldLoad'], 'desktop')).toEqual([]);
+  });
+
+  it('returns nothing for an empty list', () => {
+    expect(findBudgetsNamingProfile([], 'desktop')).toEqual([]);
   });
 });

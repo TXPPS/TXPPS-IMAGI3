@@ -91,3 +91,27 @@ describe('measurement files', () => {
     expect(() => readAllMeasurements(dir)).toThrow(MeasurementError);
   });
 });
+
+/**
+ * A review found the throttling evidence had no round-trip coverage: dropping
+ * the field on read or on write fails closed rather than open, but silently.
+ */
+describe('throttling evidence round-trip', () => {
+  it('survives a write and read unchanged', () => {
+    const dir = tempDir();
+    writeMeasurements('harness', [{ id: 'a', value: 1, throttleRatio: 4.25 }], dir);
+    expect(readAllMeasurements(dir)[0]?.throttleRatio).toBe(4.25);
+  });
+
+  it('stays undefined when the harness did not record it', () => {
+    const dir = tempDir();
+    writeMeasurements('harness', [{ id: 'a', value: 1 }], dir);
+    expect(readAllMeasurements(dir)[0]?.throttleRatio).toBeUndefined();
+  });
+
+  it('rejects a non-numeric throttling record rather than dropping it', () => {
+    expect(() => parseMeasurements([{ id: 'a', value: 1, throttleRatio: '4' }], 'w')).toThrow(
+      MeasurementError,
+    );
+  });
+});

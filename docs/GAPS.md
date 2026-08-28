@@ -155,11 +155,16 @@ throttling was applied to Playwright's fixture page while the cold-load spec
 measured pages it opened itself, so every device-named budget was still taken at
 full desktop speed. The independent Performance review caught it. See RC-0006.
 
-As it now stands: the tablet and phone profiles run under calibrated CPU
-throttling (4x and 6x, measured 4.3x and 6.5x); every page the harness measures
-is opened through a fixture that throttles it and then verifies the throttling
-on that page; each measurement records the ratio observed, and the budget gate
-rejects a device-scoped measurement whose ratio is missing or near 1.0x.
+As it now stands: the tablet and phone profiles run under CPU throttling
+requested at 4x and 6x; every page the harness measures is opened through a
+fixture that throttles it and then verifies the throttling on that page; each
+measurement records the ratio observed, and the budget gate rejects a
+device-scoped measurement whose ratio is missing, or below the slowdown that
+budget needs in order to fail for the reason it names — the ratio between its
+ceiling and the unthrottled ceiling, which for the cold-load budgets is 2.0x.
+The achieved slowdown varies with host and contention: the calibration bench
+reports 4.3x and 6.5x, while per-run evidence on a contended four-core host
+records 4.0x-5.4x for the tablet.
 `pnpm audit:profile-ordering` separately asserts the profiles come out in the
 right order, and removing throttling collapses every ratio to 1.00x and fails
 it. The unthrottled desktop budget was renamed `ci-headless.editor.coldLoad`,

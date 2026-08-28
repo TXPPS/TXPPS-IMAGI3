@@ -110,3 +110,22 @@ describe('generated declaration output', () => {
     expect(files).not.toContain(join(REPO_ROOT, 'tests/e2e/globals.ts'));
   });
 });
+
+/**
+ * Found by review: matching only on a `.ts` sibling flags files whose names
+ * merely end in `.ts` before the `.d.ts`. The extension check is what stops
+ * `a/x.ts` plus `a/x.ts.ts` from reading as a generated pair.
+ */
+describe('findStrayDeclarations extension handling', () => {
+  it.each([
+    ['a doubled ts extension', ['a/x.ts', 'a/x.ts.ts']],
+    ['a js source with a ts sibling', ['a/x.js', 'a/x.js.ts']],
+    ['a tsx source with a ts sibling', ['a/x.tsx', 'a/x.tsx.ts']],
+  ])('does not flag %s', (_label, files) => {
+    expect(findStrayDeclarations(files)).toEqual([]);
+  });
+
+  it('still flags the real generated pair', () => {
+    expect(findStrayDeclarations(['a/x.ts', 'a/x.d.ts'])).toEqual(['a/x.d.ts']);
+  });
+});

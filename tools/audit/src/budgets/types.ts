@@ -37,12 +37,22 @@ export interface Measurement {
   /** ISO timestamp stamped when the value was written to disk. */
   readonly recordedAt?: string | undefined;
   /**
-   * CPU slowdown measured on the page that produced this value.
+   * CPU slowdown observed on the page that produced this value.
    *
    * Required for any budget scoped to a throttled device profile. A
    * device-named budget measured on an unthrottled page carries no device
    * signal, and the absence of this field is what makes that detectable from
    * the artifact rather than from trusting the harness that wrote it.
+   *
+   * For a profile that requests no throttling this is 1 by construction rather
+   * than by a second measurement, and such profiles are exempt from the check.
+   *
+   * The limit of this field, stated so it is not mistaken for more: it is a
+   * recorded number compared against a declared rate, so it cannot distinguish
+   * a genuinely measured 4.2x from a hand-written one. That is the floor of
+   * artifact-level checking — a number in a file cannot attest itself. What it
+   * does buy is that the failure it exists to catch is no longer a single
+   * plausible omission; forging it takes deliberate edits in three files.
    */
   readonly throttleRatio?: number | undefined;
 }
