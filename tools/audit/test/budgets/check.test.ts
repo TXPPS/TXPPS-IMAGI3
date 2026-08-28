@@ -220,3 +220,29 @@ describe('requiredThrottleRatio', () => {
     expect(report.results.find((r) => r.rule.id === 'demo.tablet')?.status).toBe('passed');
   });
 });
+
+/**
+ * The pairing that derives the floor must be unambiguous. With two candidates,
+ * `find` would silently pick whichever came first in the file and every device
+ * budget's floor would be quietly wrong.
+ */
+describe('unthrottled counterpart pairing', () => {
+  const throttled = rule({ id: 'demo.tablet', scope: 'tablet', max: 9000, unit: 'ms' });
+
+  it('derives from a single unambiguous counterpart', () => {
+    const only = rule({ id: 'ci-headless.a', scope: 'desktop', max: 3000, unit: 'ms' });
+    expect(requiredThrottleRatio(throttled, [only, throttled])).toBe(3);
+  });
+
+  it('falls back to the default when two counterparts are candidates', () => {
+    const first = rule({ id: 'ci-headless.a', scope: 'desktop', max: 3000, unit: 'ms' });
+    const second = rule({ id: 'ci-headless.b', scope: 'desktop', max: 9000, unit: 'ms' });
+    expect(requiredThrottleRatio(throttled, [first, second, throttled])).toBe(2);
+  });
+
+  it('ignores a counterpart in a different unit', () => {
+    const bytes = rule({ id: 'ci-headless.bytes', scope: 'all', max: 100, unit: 'bytes' });
+    const ms = rule({ id: 'ci-headless.a', scope: 'desktop', max: 3000, unit: 'ms' });
+    expect(requiredThrottleRatio(throttled, [bytes, ms, throttled])).toBe(3);
+  });
+});

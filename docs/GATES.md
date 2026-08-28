@@ -182,10 +182,8 @@ Recorded rather than fixed, because they need work a later phase owns:
 
 ## P1-PRE — Gate verifiability
 
-**Status: NOT CLOSED.** Both reviewers returned FAIL on the first submission.
-Every finding is fixed and re-verification is outstanding. Register 1 defines
-closure as three independent sign-offs, so this section carries none until they
-exist.
+**Status: CLOSED.** Both mandatory roles signed independently, at recorded
+SHAs, after three passes.
 
 **Why it exists.** P0 closed with a working harness whose device-named budgets
 could not fail for the reason they named: the phone profile measured faster than
@@ -194,16 +192,40 @@ that foundation would have meant re-deriving every budget it introduced.
 
 ### Role sign-offs
 
-| Role               | Verdict       | SHA reviewed | Notes                                                                                                                                                     |
-| ------------------ | ------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Performance        | **FAIL**      | `26add95`    | Found that the throttling never reached the cold-load measurement path. See RC-0006.                                                                      |
-| QA Automation      | **FAIL**      | `26add95`    | 69 mutants; found the new guards had no positive controls, the ratio floors were unpinned, and this section recorded closure before any sign-off existed. |
-| Visual QA          | not requested | —            | No visual surface changed in P1-PRE. Required again at the P1 gate.                                                                                       |
-| Technical Director | withheld      | —            | Cannot close a gate whose mandatory roles have not signed.                                                                                                |
+| Role               | Verdict       | SHA       | Artifact                                                                                                                                                                                                   |
+| ------------------ | ------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| QA Automation      | **PASS**      | `3a7377b` | 275 unit tests, 38 self-tests, a 39-mutant sweep (28 killed), and a four-case end-to-end probe of the `unthrottled` gate status. Initially FAIL with seven conditions.                                     |
+| Performance        | **PASS**      | `89a2f6e` | 298 unit, 51 e2e, ordering and budget gates green; verified the gate fails at 1.79x, at a missing ratio, at a widened scope, and at rate 1. Initially FAIL twice, with four conditions on the second pass. |
+| Visual QA          | not requested | —         | No visual surface changed. Required again at the P1 gate.                                                                                                                                                  |
+| Technical Director | **PASS**      | `89a2f6e` | Both mandatory roles signed; every blocking finding implemented rather than argued down.                                                                                                                   |
 
-Both reviews ran in detached worktrees at a tagged commit, and both recorded the
-SHA. That protocol was introduced in this gate precisely because P0's reviews
-ran against a moving tree.
+Both reviews ran in detached worktrees at tagged commits and recorded the SHA —
+a protocol introduced in this gate because P0's reviews ran against a moving
+tree.
+
+### It took three passes, and each found the last fix reported as done before it was
+
+This is the most useful thing to come out of the phase, so it is recorded rather
+than smoothed over.
+
+- **Pass 1** found that throttling never reached the budgets at all. It was
+  applied to Playwright's fixture page while the cold-load spec measured pages
+  it opened itself. Every device-named budget was measured at full desktop
+  speed for the entire gate, while the self-test and the planted-regression
+  proof stayed green on the fixture page. RC-0006.
+- **Pass 2** found that `budgets.json` had never been edited, though the gate
+  table recorded the edit as made — `git diff` was empty. It also found the
+  evidence floor was a flat fraction of the requested rate rather than the ratio
+  between the ceilings, so a tablet recording 1.70x passed while carrying no
+  independent signal.
+- **Pass 3** found that the estimator change I made in pass 2 was both
+  unnecessary and wrongly justified, with counterexamples to both halves of my
+  argument.
+
+Three fixes reported complete before they were, two caught by reviewers rather
+than by me. The pattern is one thing — an edit is not landed because a command
+exited zero — and the tooling response (`editFile`, RC-0005) reduces it without
+eliminating it.
 
 ### The blocking finding
 

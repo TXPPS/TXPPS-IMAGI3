@@ -164,7 +164,10 @@ budget needs in order to fail for the reason it names — the ratio between its
 ceiling and the unthrottled ceiling, which for the cold-load budgets is 2.0x.
 The achieved slowdown varies with host and contention: the calibration bench
 reports 4.3x and 6.5x, while per-run evidence on a contended four-core host
-records 4.0x-5.4x for the tablet.
+records 3.7x-4.6x for the tablet and 4.6x-6.0x for the phone. That evidence is
+the median of the per-page observations — the minimum reads as low as 1.96x on a
+genuinely throttled page when a baseline draw is unlucky, and the maximum
+flatters.
 `pnpm audit:profile-ordering` separately asserts the profiles come out in the
 right order, and removing throttling collapses every ratio to 1.00x and fails
 it. The unthrottled desktop budget was renamed `ci-headless.editor.coldLoad`,

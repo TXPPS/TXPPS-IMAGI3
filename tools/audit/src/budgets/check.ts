@@ -37,13 +37,17 @@ function unthrottledCounterpart(
   rule: BudgetRule,
   rules: readonly BudgetRule[],
 ): number | undefined {
-  const counterpart = rules.find(
+  const counterparts = rules.filter(
     (candidate) =>
       isCiHeadlessBudget(candidate.id) &&
       candidate.unit === rule.unit &&
       candidate.max !== undefined,
   );
-  return counterpart?.max;
+  // Exactly one, or the pairing is a guess. With two ci-headless budgets in the
+  // same unit, `find` would silently pair every device budget to whichever came
+  // first in the file, and the derived floor would be quietly wrong.
+  if (counterparts.length !== 1) return undefined;
+  return counterparts[0]?.max;
 }
 
 /** The slowdown a rule's measurement must evidence for the rule to mean anything. */

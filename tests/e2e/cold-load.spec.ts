@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 import { READY_ATTRIBUTE, READY_MARK } from '../../apps/editor/src/constants.ts';
 import { COLD_LOAD_BUDGET_IDS, type PageIncident } from '@imagi3/audit';
 import { recordMeasurements, ruleFor } from './budget.ts';
+import { median } from '@imagi3/repo';
 import { expect, test, throttlingFor, type OpenThrottledPage } from './fixtures.ts';
 import { installIncidentCapture } from './incidents.ts';
 
@@ -119,13 +120,23 @@ test.describe('cold load', () => {
       samples.push(await sampleColdLoad(openPage, incidents, profile.cpuThrottlingRate));
     }
     const elapsedMs = worst(samples.map((s) => s.elapsedMs));
-    // The strongest ratio any sampled page showed, because every depressing
-    // influence on this estimate is one-directional: parallel workers slow the
-    // unthrottled baseline, and a probe short against CDP's sleep duty cycle
-    // under-reports the slowdown. The best observation is the closest to the
-    // truth, not the most flattering — a genuinely unthrottled page reads 1.0x
-    // on every sample, so this cannot manufacture evidence that is not there.
-    const throttleRatio = Math.max(...samples.map((s) => s.throttleRatio));
+    // The median of the per-page ratios.
+    //
+    // Note this is the opposite choice from `worst()` above, deliberately,
+    // because the two quantities are being estimated for different purposes.
+    // The elapsed time feeds a *budget*, where the conservative bound is what
+    // protects against regressions. This ratio is an *estimate of a physical
+    // property* — how much the renderer was actually slowed — and there the
+    // robust central estimate is the honest one.
+    //
+    // It was briefly the maximum, on the argument that every influence on the
+    // estimate depresses it. Review disproved both halves of that: contention
+    // on the throttled draws inflates the ratio, and a page that is never
+    // throttled measured 1.31x rather than the 1.0x the argument assumed. The
+    // minimum is not right either — it is one bad baseline draw away from
+    // reading 1.96x on a genuinely 4x-throttled page, which this host produced.
+    // The median is damaged by neither a lucky draw nor an unlucky one.
+    const throttleRatio = median(samples.map((s) => s.throttleRatio));
 
     const budgetId = COLD_LOAD_BUDGET_IDS[profile.id];
     const rule = ruleFor(budgetId);
