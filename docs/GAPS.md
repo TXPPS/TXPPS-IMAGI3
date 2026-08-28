@@ -147,21 +147,31 @@ asset upload interrupted partway.
 
 ## GAP-006 — Performance measurements are device-labelled but not device-representative
 
-**Status:** open. **Blocks:** honest sign-off of any device-specific
-performance claim, including the P5 and P6 gates.
+**Status:** NARROWED in P1-PRE, still open. **Blocks:** honest sign-off of any
+device-specific performance claim, including the P5 and P6 gates.
+
+**What P1-PRE fixed.** The tablet and phone profiles now run under calibrated
+CPU throttling (4x and 6x, measured 4.3x and 6.5x), and `pnpm
+audit:profile-ordering` asserts on every run that the profiles come out in the
+right order — removing throttling collapses every ratio to 1.00x and fails the
+check. The unthrottled desktop budget was renamed `ci-headless.editor.coldLoad`
+so it no longer asserts a device claim, and the real desktop claim moved to the
+DEVICE-VERIFIED register as DV-004. A planted fixed-work CPU regression is now
+proven to pass the unthrottled budget and breach the throttled one. See
+ADR-0011.
+
+**What remains open**, and it is still substantial:
 
 `editor.coldLoad.tablet` and `editor.coldLoad.phone` are named for devices but
-are measured on desktop-class hardware. Nothing in the harness throttles CPU or
-network, and the Playwright profiles differ only in viewport, device pixel ratio
-and touch emulation. The proof that the labels carry no performance signal is in
-the numbers themselves: the "phone" profile routinely measures _faster_ than the
-"desktop" profile, because they are the same machine.
+are still measured on desktop-class hardware wearing a CPU handicap. Throttling
+makes the profiles genuinely different from each other; it does not make either
+of them a device.
 
 Four specific limits:
 
-1. **No CPU or network throttling.** Chrome DevTools Protocol supports both
-   (`Emulation.setCPUThrottlingRate`, `Network.emulateNetworkConditions`) and
-   neither is used.
+1. **No network throttling.** CPU throttling is now applied;
+   `Network.emulateNetworkConditions` is not. A phone on a real network pays
+   latency this harness never sees.
 2. **Loopback server.** `vite preview` over 127.0.0.1 pays no DNS, TLS, or
    real-network latency, and its cache headers are not a deployed editor's.
 3. **The measurement anchors on first contentful paint, not interactivity.**
@@ -186,10 +196,9 @@ loads within 6 s on a phone.
    both numbers side by side so the emulation error is visible rather than
    assumed.
 
-**Cheaper partial mitigation, worth doing before P5:** apply CPU throttling
-(roughly 4x for tablet, 6x for phone) and a network profile to the emulated
-runs. That still is not the device, but it stops the profile labels from being
-purely decorative.
+**Remaining cheap mitigation, worth doing before P5:** apply a network profile
+alongside the CPU throttling that now exists. That still is not the device, but
+latency is the largest remaining emulation error for a cold load.
 
 ---
 

@@ -282,3 +282,57 @@ gate incapable of catching real regressions).
 
 **Tracked as:** GAP-003, which also carries the threshold calibration work that
 must happen when baselines land.
+
+---
+
+## ADR-0011 — A budget named for a device must be measured under something like that device
+
+**Status:** accepted (P1-PRE)
+
+**Decision:** the tablet and phone profiles run under calibrated CPU
+throttling. The desktop profile does not, and its budget is therefore named
+`ci-headless.editor.coldLoad` rather than `editor.coldLoad.desktop`.
+
+At the end of P0 all three profiles differed only in viewport, device pixel
+ratio and touch emulation. The consequence was not subtle: the phone profile
+routinely measured **faster** than the desktop profile, because it was the same
+machine. Three green rows named for three devices were reporting one number
+about one workstation.
+
+A gate that cannot fail for the reason it names is not a gate.
+
+**What changed:**
+
+1. **Throttling, calibrated rather than guessed.** `Emulation.setCPUThrottlingRate`
+   takes a requested multiplier, not a guaranteed one. `pnpm calibrate:cpu`
+   sweeps requested rates against a fixed arithmetic workload in a real browser
+   and reports the achieved slowdown. Tablet 4 (measured 4.1x-4.8x), phone 6
+   (measured 6.5x-6.8x).
+2. **Ordering asserted on every run.** Absolute slowdowns vary by host; the
+   ordering does not. `pnpm audit:profile-ordering` requires tablet >= 2.0x
+   desktop and phone >= 1.15x tablet. Remove throttling and every ratio
+   collapses to 1.00x and the check fails — verified by doing it.
+3. **Honest naming for what stays unthrottled.** A budget id that names a device
+   asserts a device claim. The unthrottled profile's does not any more, a test
+   enforces that no budget is named after an unthrottled profile, and the real
+   desktop claim moved to the DEVICE-VERIFIED register as DV-004.
+
+**The regression must be fixed work, not a wall-clock stall.** This is the part
+that is easy to get wrong. A `while (now < deadline)` spin takes the same wall
+time however slow the CPU is, so it breaches every profile equally and proves
+nothing about throttling. The planted regression therefore performs a fixed
+number of arithmetic operations: constant work, whose wall cost scales with CPU
+speed. Sized from measured timings, it lands at roughly 2.0s unthrottled
+(inside the 3s ceiling) and 8.5s at the tablet's 4x (well past the 6s ceiling).
+
+**What this does not fix.** Throttled emulation on a workstation is still not a
+phone: the server is loopback, the measurement anchors on first contentful
+paint, and no real memory pressure or GPU limit is in play. GAP-006 is narrowed,
+not closed.
+
+**Rejected:** leaving the profiles unthrottled and relying on GAP-006 to warn
+readers (a warning in a document does not stop a green row from being read as a
+device claim); keeping the `editor.coldLoad.desktop` id because the brief names
+a desktop ceiling (the brief names a ceiling for real desktops, which is
+precisely what is not being measured); throttling by wall-clock delay injection
+(measures nothing about CPU speed).

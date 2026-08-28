@@ -67,10 +67,74 @@ Each of those choices exists to close a specific hole:
 - **A median of three**, because a single sample is noise once a budget stops
   having two orders of magnitude of headroom.
 
-What this still does not measure is in GAP-006, and it is substantial: no CPU or
-network throttling, a loopback server, and no accounting for work deferred past
-first paint. A green phone cold-load row does not mean the editor loads in time
-on a phone.
+## CPU throttling, and how the rates were chosen
+
+The tablet and phone profiles run under CDP CPU throttling. Without it they
+differed from desktop only in viewport, device pixel ratio and touch emulation,
+so a budget named for a phone measured a developer workstation. The evidence was
+unmissable: the phone profile routinely measured **faster** than the desktop
+profile, because it was the same machine.
+
+`Emulation.setCPUThrottlingRate` takes a _requested_ multiplier, not a
+guaranteed one — what it achieves depends on the host CPU, the scheduler and the
+workload. So the rates are measured, not assumed.
+
+**Calibration method.** `pnpm calibrate:cpu` runs a fixed arithmetic workload
+(80 million iterations of an integer LCG fold) in a real browser page at each
+requested rate, taking the median of five samples after two warmup runs, and
+reports the slowdown each rate actually produced. The workload is deliberate:
+
+- **Deterministic**, so the result can be asserted. A JIT that elides the loop,
+  or a throttling implementation that skips work rather than slowing it, changes
+  the answer and throws instead of returning an impressively fast number.
+- **Integer only**, so it is identical across platforms and engines.
+- **CPU bound**, with no allocation, DOM or I/O, so throttling is the only thing
+  that moves the wall time.
+
+Measured on the reference host:
+
+| requested | median ms | achieved |
+| --------- | --------- | -------- |
+| 1         | 102.7     | 1.00x    |
+| 2         | 218.2     | 2.12x    |
+| 3         | 328.0     | 3.19x    |
+| 4         | 443.8     | 4.32x    |
+| 5         | 548.9     | 5.34x    |
+| 6         | 663.7     | 6.46x    |
+| 8         | 853.8     | 8.31x    |
+
+**Chosen rates:** tablet 4 (measured 4.1x-4.8x), phone 6 (measured 6.5x-6.8x).
+These are the DevTools mid-tier and low-tier mobile presets, now with measured
+rather than assumed slowdowns behind them.
+
+**Absolute slowdowns are host-dependent** and will differ on a CI runner. What
+is host-independent — and therefore what the harness asserts on every run — is
+the _ordering_. `pnpm audit:profile-ordering` requires the tablet to take at
+least 2.0x the desktop time and the phone at least 1.15x the tablet time, cut
+well below the measured 4.3x and 1.4x so a slow runner cannot produce a false
+failure, and far above 1.0 so removing throttling cannot produce a false pass.
+
+That check is the mutation test for the throttling itself. With throttling
+removed, every ratio collapses to exactly 1.00x and the check exits non-zero.
+This was verified by doing it.
+
+## Budgets that carry no device signal
+
+One budget still runs unthrottled: the desktop profile. On a CI runner it
+measures the runner. Its id is therefore `ci-headless.editor.coldLoad`, not
+`editor.coldLoad.desktop`, and its description says so. A test asserts that no
+budget is named after an unthrottled profile, so the naming cannot quietly
+regress. The real desktop claim lives in the DEVICE-VERIFIED register as DV-004,
+unverified. See ADR-0011.
+
+## What throttling still does not fix
+
+GAP-006 is narrowed, not closed. Still true: the server is loopback, so there is
+no DNS, TLS or real-network latency; the measurement anchors on first contentful
+paint, so work deferred past it is uncounted; and throttled emulation on a
+workstation is not a phone. A green phone cold-load row means the editor loads
+quickly under a 6x CPU handicap on a developer machine. It does not mean the
+editor loads in time on a phone.
 
 ## Provenance
 

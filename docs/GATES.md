@@ -1,12 +1,40 @@
 # GATES
 
-A phase gate closes only when QA Automation, Visual QA and Performance have each
-independently signed off. Sign-off is a **test artifact plus a line in this
-table** — never a claim. A role that cannot verify a criterion records that
-rather than assuming it.
+Two registers, because two different things were being called "a gate".
 
-Reviews are run as independent role reviewers with their own lane, their own
-tooling, and no obligation to agree with the implementer.
+## Register 1 — CI-VERIFIED
+
+Criteria the harness can close by itself, on every run, without a human or a
+device. **A phase closes when its CI-VERIFIED criteria are signed**, by QA
+Automation, Visual QA and Performance independently. Sign-off is a **test
+artifact plus a line in a table** — never a claim. A role that cannot verify a
+criterion records that rather than assuming it.
+
+## Register 2 — DEVICE-VERIFIED (DEFERRED)
+
+Criteria that need physical hardware, a real GPU, or a human looking at a
+screen. **A deferred gate never closes a phase.** It is tracked to P9 and
+blocks the Definition of Done. Nothing here may be reported as passing, and no
+phase may be described as complete on the strength of a deferred entry.
+
+The split exists because the two were previously mixed, and mixing them makes
+the stronger claim absorb the weaker one. "The P6 gate is green" reads as "this
+works on a phone" unless the register makes explicit that no phone was
+involved.
+
+### Reviewer isolation
+
+Every review runs in a **detached `git worktree` at a tagged commit**, and each
+report records the SHA it ran against. Reviewing a mutable working tree is a
+process failure and is logged as one: it happened during P0, where source files
+changed two seconds before a reviewer's end-to-end run finished, and the
+resulting artifact was described as frozen when it was not.
+
+```
+git tag -a review/<phase>-<n> -m "..."          # implementer, before requesting review
+git worktree add --detach ../review-<role> review/<phase>-<n>
+cd ../review-<role> && pnpm install --frozen-lockfile
+```
 
 ---
 
@@ -135,10 +163,75 @@ Recorded rather than fixed, because they need work a later phase owns:
 - `cli/check-budgets.ts` retains seven lines of untested CLI wiring around the
   tested `runBudgetGate`.
 
-### Explicitly not claimed
+---
 
-- Real iOS Safari or Android hardware behaviour (GAP-001, GAP-004).
-- The WebGPU renderer path, which has never run against two real backends
-  (GAP-002).
-- Locked screenshot baselines — a P3 gate, deliberately not attempted (GAP-003).
-- That a green phone cold-load row says anything about a phone (GAP-006).
+## P1-PRE — Gate verifiability
+
+**Status: CLOSED.**
+
+**Why it exists.** P0 closed with a working harness whose device-named budgets
+could not fail for the reason they named. The phone profile measured faster than
+the desktop profile. Fixing that after building P1 on top of it would have meant
+re-deriving every budget the new code introduced, so it was made blocking.
+
+### Criterion evidence
+
+| Criterion                                                               | Evidence                                                                                                                                                                                                                                                                                                | Status |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| CPU throttling applied and calibrated                                   | `pnpm calibrate:cpu` sweeps seven requested rates against a fixed 80M-iteration integer workload in a real page, median of five after two warmups. Rates chosen from measured slowdown: tablet 4 (4.32x), phone 6 (6.46x). Recorded in `docs/BUDGETS.md` and `profiles.ts`.                             | PASS   |
+| Profile ordering asserted                                               | `pnpm audit:profile-ordering` — tablet 4.12x desktop (required 2.0x), phone 1.51x tablet (required 1.15x)                                                                                                                                                                                               | PASS   |
+| Ordering check is the mutation test for throttling                      | Rates forced to 1 and the suite re-run: every ratio collapsed to exactly **1.00x**, check exited 1. Restored, exited 0.                                                                                                                                                                                 | PASS   |
+| Unthrottled budgets renamed honestly                                    | `editor.coldLoad.desktop` → `ci-headless.editor.coldLoad`; `real-config.test.ts` asserts no budget is named after an unthrottled profile, and that every `ci-headless.` budget says it carries no device signal                                                                                         | PASS   |
+| Deferred register populated                                             | Register 2 below, DV-001 through DV-006                                                                                                                                                                                                                                                                 | PASS   |
+| Planted perf regression caught by the throttled budget and nothing else | `tests/e2e/planted-perf.spec.ts` — the same fixed-work regression is `passed` on the unthrottled profile (2.4s vs a 3s ceiling) and `violated` on the throttled tablet (7.9s vs a 6s ceiling) and phone (12.4s). The console guard reports nothing and the screenshot comparator reports no difference. | PASS   |
+| That proof is itself load-bearing                                       | Throttling removed and the tablet leg re-run: it loaded in 2.07s, the budget returned `passed`, and the test failed with `Expected "violated"`.                                                                                                                                                         | PASS   |
+
+### What this cost
+
+DV-004. The desktop cold-load budget previously carried the brief's 3s desktop
+ceiling under a device name and reported green. It now reports green under a
+name that admits it measures a CI runner, and the device claim it used to imply
+sits unverified in Register 2. That is a real loss of apparent coverage and an
+exact gain in honesty.
+
+### Note on the fixed-work regression
+
+The first design for the planted regression was a wall-clock busy-wait, which
+would have proved nothing: a spin on `performance.now()` takes the same wall
+time however slow the CPU is, so it breaches every profile equally. The fault
+performs a fixed number of arithmetic operations instead. Recorded in ADR-0011
+because it is the kind of mistake that produces a confidently green test.
+
+---
+
+# Register 2 — DEVICE-VERIFIED (DEFERRED)
+
+Every entry below is a claim the automated suite **cannot** make. None of them
+may be counted toward closing a phase. All of them block the Definition of Done
+in P9.
+
+| ID     | Claim                                                                                               | Blocked phase gate | Why CI cannot close it                                                                                                                                                                                      | Procedure |
+| ------ | --------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| DV-001 | The WebGPU renderer path matches WebGL2 within the mandated perceptual bound                        | P1                 | CI runners have no GPU; the development container has no working Docker daemon. The comparator and its thresholds exist and are unit-tested, but have never been run against two real backends.             | GAP-002   |
+| DV-002 | The editor loads, plays and survives a soak on real iPhone hardware within the memory budget        | P6                 | Emulated Chromium at 390x844 is not iOS Safari. Tab termination under memory pressure, OPFS eviction on idle, WebAudio unlock and PWA install from the share sheet are all unobservable here.               | GAP-001   |
+| DV-003 | Screenshot baselines are locked against a reproducible rendering environment                        | P3                 | Font rasterisation differs between environments; baselines captured in the development container would fail in CI. Antialiasing-susceptible edge pixels measure 5x-9x the entire same-backend pixel budget. | GAP-003   |
+| DV-004 | The editor cold-loads within 3s on real desktop hardware                                            | P0                 | The profile that carries the brief's 3s ceiling runs unthrottled on a CI runner. It measures the runner. Its budget id was renamed `ci-headless.editor.coldLoad` to stop it implying otherwise.             | GAP-006   |
+| DV-005 | Touch targets, gestures and the on-screen keyboard behave correctly on real Android tablet hardware | P5                 | Emulated touch does not exercise a real digitiser, pointer-event coalescing, or the on-screen keyboard.                                                                                                     | GAP-004   |
+| DV-006 | Sync survives real network partitions against deployed Cloudflare infrastructure                    | P4                 | Local emulation does not reproduce Durable Object eviction mid-write, R2 consistency under concurrent multi-device writes, or real partition timing.                                                        | GAP-005   |
+
+Each row's procedure lives in `docs/GAPS.md` under the referenced entry. A row
+leaves this register only when the procedure has actually been performed and
+its result recorded — not when it becomes inconvenient.
+
+## What P1-PRE changed about this register
+
+Before P1-PRE, DV-001 through DV-006 were scattered through `docs/GAPS.md` and
+the P0 gate table's "explicitly not claimed" section. They were honest, but they
+sat next to passing criteria in the same document, which invited exactly the
+absorption this split exists to prevent.
+
+DV-004 is new, and it is the one that cost something. The desktop cold-load
+budget previously carried the brief's 3s desktop ceiling under the id
+`editor.coldLoad.desktop`. It runs unthrottled, so on a CI runner it measures
+the runner. Renaming it gave up a green row that looked like a device claim, and
+moved the real claim here, unverified. See ADR-0011.

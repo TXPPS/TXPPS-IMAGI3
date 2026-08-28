@@ -2,8 +2,14 @@
 
 <!-- Rewrite this file after every completed task. Prune aggressively. -->
 
-**Phase:** P0 — Foundation
-**Phase status:** complete — all three mandatory roles signed independently (docs/GATES.md)
+**Phase:** P0
+**Phase status:** P0 closed. P1-PRE (gate verifiability, blocking) closed. P1 not started.
+
+<!-- The **Phase:** line above is a machine contract: a test requires it to
+     match budgets.json currentPhase, so it must be one of the brief's phase
+     ids. P1-PRE is a blocking sub-gate on the way to P1, not a phase, so it is
+     recorded on the status line instead. -->
+
 **Tree status:** green — `pnpm sweep` passes end to end
 
 ## In flight
