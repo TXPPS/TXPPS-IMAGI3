@@ -46,3 +46,41 @@ export function withDifferingPixels(source: RgbaImage, count: number): RgbaImage
   }
   return { width: source.width, height: source.height, data };
 }
+
+/**
+ * Overwrite a square block with opaque black, simulating a control that
+ * vanished. Concentrated damage: few pixels overall, but the structure of the
+ * windows covering the block is destroyed.
+ */
+export function withWipedBlock(
+  source: RgbaImage,
+  origin: { readonly x: number; readonly y: number },
+  side: number,
+): RgbaImage {
+  const data = new Uint8Array(source.data);
+  for (let y = 0; y < side; y += 1) {
+    for (let x = 0; x < side; x += 1) {
+      const offset = ((origin.y + y) * source.width + (origin.x + x)) * RGBA_CHANNELS;
+      data[offset] = 0;
+      data[offset + 1] = 0;
+      data[offset + 2] = 0;
+      data[offset + 3] = 255;
+    }
+  }
+  return { width: source.width, height: source.height, data };
+}
+
+/**
+ * Brighten every `stride`-th pixel. Diffuse damage: many pixels cross the
+ * per-pixel threshold, but no window loses enough structure to be flagged.
+ */
+export function withScatteredShift(source: RgbaImage, stride: number, delta: number): RgbaImage {
+  const data = new Uint8Array(source.data);
+  for (let i = 0; i < source.width * source.height; i += stride) {
+    const offset = i * RGBA_CHANNELS;
+    for (let channel = 0; channel < 3; channel += 1) {
+      data[offset + channel] = Math.min(255, (data[offset + channel] ?? 0) + delta);
+    }
+  }
+  return { width: source.width, height: source.height, data };
+}

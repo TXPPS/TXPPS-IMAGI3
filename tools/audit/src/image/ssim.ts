@@ -7,10 +7,29 @@ const K2 = 0.03;
 const C1 = (K1 * RGB_MAX) ** 2;
 const C2 = (K2 * RGB_MAX) ** 2;
 
-/** Local window size in pixels. Uniform weighting, not Gaussian, for determinism. */
+/**
+ * Local window size in pixels, with uniform rather than Gaussian weighting.
+ *
+ * Wang et al. adopt a Gaussian kernel to suppress blocking artifacts in the
+ * SSIM map. That matters when the map itself is the output; here the map is
+ * reduced to summary statistics, so the simpler uniform window is adequate and
+ * has one fewer parameter to justify.
+ */
 const WINDOW_SIZE = 8;
 /** Window stride; half the window keeps neighbouring windows overlapping. */
 const WINDOW_STRIDE = 4;
+
+/**
+ * Per-window score below which a window counts as structurally destroyed.
+ *
+ * Deliberately well below the whole-frame threshold, so the two SSIM gates
+ * detect different things rather than one subsuming the other: the mean catches
+ * broad drift where every window degrades slightly, and this catches severe
+ * damage confined to a small region. Setting both to the same value would make
+ * the mean gate unreachable, since a mean below 0.98 implies a large fraction
+ * of windows below 0.98.
+ */
+export const DEFAULT_WINDOW_FLOOR = 0.9;
 
 interface WindowRequest {
   readonly a: Float64Array;
@@ -78,13 +97,32 @@ function windowOrigins(extent: number, size: number, stride: number): number[] {
   return origins;
 }
 
+export interface SsimStatistics {
+  /** Mean structural similarity over all windows, in [-1, 1]. */
+  readonly mean: number;
+  /** The single worst window score. */
+  readonly min: number;
+  readonly windowCount: number;
+  /** Windows scoring below the per-window floor. */
+  readonly lowWindowCount: number;
+  /** {@link lowWindowCount} over {@link windowCount}, in [0, 1]. */
+  readonly lowWindowRatio: number;
+}
+
 /**
- * Mean structural similarity between two images, in [-1, 1] where 1 is
- * identical. Computed on the Rec. 709 luma plane with uniform 8x8 windows at
- * stride 4; uniform weighting keeps the result bit-reproducible across
- * machines, which a Gaussian kernel with float weights does not guarantee.
+ * Structural similarity summarised several ways.
+ *
+ * The mean alone is a poor gate at UI resolutions: a 1440x900 frame yields on
+ * the order of 80,000 windows, so deleting a whole control divides its
+ * structural collapse by 80,000 and lands well inside any sane mean threshold.
+ * The proportion of damaged windows is what actually detects a localised
+ * regression, so it is reported and gated alongside the mean.
  */
-export function meanSsim(baseline: RgbaImage, candidate: RgbaImage): number {
+export function ssimStatistics(
+  baseline: RgbaImage,
+  candidate: RgbaImage,
+  windowFloor: number = DEFAULT_WINDOW_FLOOR,
+): SsimStatistics {
   assertSameShape(baseline, candidate);
   const planeA = toLumaPlane(baseline);
   const planeB = toLumaPlane(candidate);
@@ -93,14 +131,33 @@ export function meanSsim(baseline: RgbaImage, candidate: RgbaImage): number {
   const ys = windowOrigins(baseline.height, size, WINDOW_STRIDE);
 
   let total = 0;
+  let min = Number.POSITIVE_INFINITY;
+  let lowWindowCount = 0;
+
   for (const y of ys) {
     for (const x of xs) {
-      total += ssimFromStats(
+      const score = ssimFromStats(
         collectPairStats({ a: planeA, b: planeB, width: baseline.width, origin: { x, y }, size }),
       );
+      total += score;
+      if (score < min) min = score;
+      if (score < windowFloor) lowWindowCount += 1;
     }
   }
-  return total / (xs.length * ys.length);
+
+  const windowCount = xs.length * ys.length;
+  return {
+    mean: total / windowCount,
+    min,
+    windowCount,
+    lowWindowCount,
+    lowWindowRatio: lowWindowCount / windowCount,
+  };
+}
+
+/** Mean structural similarity, in [-1, 1] where 1 is identical. */
+export function meanSsim(baseline: RgbaImage, candidate: RgbaImage): number {
+  return ssimStatistics(baseline, candidate).mean;
 }
 
 export { WINDOW_SIZE, WINDOW_STRIDE };
