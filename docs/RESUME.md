@@ -12,8 +12,16 @@ authoring plus competent 3D authoring, in a browser, synced across devices."
 
 ## Where the project is
 
-Phase 0 (Foundation) is complete and signed. Phase 1 (Core + runtime) is next.
-Read `docs/STATE.md` for the exact next actions.
+Phase 0 (Foundation) is **complete and signed** — QA Automation, Visual QA and
+Performance each verified it independently; docs/GATES.md has the table and all
+18 blocking findings they raised. Phase 1 (Core + runtime) is next. Read
+`docs/STATE.md` for the exact next actions.
+
+One habit is worth carrying forward, because it produced most of the value in
+P0: for any gate, do not ask whether the threshold is right. Construct the
+regression the gate exists to catch and watch it fire — then delete the gate and
+watch the suite go red. Three of the five root causes in docs/BUGS.md are
+assertions that could not fail, and none of them looked wrong when written.
 
 ## Repository layout
 

@@ -20,16 +20,21 @@ failure.
 
 ### Criterion evidence
 
-| Criterion                               | Evidence                                                                                                                                                                                                                | Status               |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| CI green on an empty app                | GitHub Actions run on the branch head: `verify` (format, lint, typecheck, unit, self-test, build) and `e2e` (three profiles, budget gate)                                                                               | see run status below |
-| All three device profiles boot          | `pnpm test:e2e` — 42 tests, 14 per profile, including shell render, readiness signal, no-overflow layout and manifest fetch                                                                                             | PASS                 |
-| Audit harness catches a planted failure | `pnpm audit:selftest` — 38 assertions over 8 detectors, each planting a defect and asserting the clean counterpart stays green; plus `tests/e2e/planted-fault.spec.ts` driving four faults through the real running app | PASS                 |
+| Criterion                               | Evidence                                                                                                                                                                                                                                                                                              | Status |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| CI green on an empty app                | GitHub Actions run 33191437089 on commit `a1069d3`: both jobs `success`. `verify` ran format, lint, typecheck, unit tests, the harness self-test and build; `e2e` built, measured the bundle, ran all three profiles inside `mcr.microsoft.com/playwright:v1.56.1-noble`, then passed the budget gate | PASS   |
+| All three device profiles boot          | `pnpm test:e2e` — 42 tests, 14 per profile, including shell render, readiness signal, no-overflow layout and manifest fetch                                                                                                                                                                           | PASS   |
+| Audit harness catches a planted failure | `pnpm audit:selftest` — 38 assertions over 8 detectors, each planting a defect and asserting the clean counterpart stays green; plus `tests/e2e/planted-fault.spec.ts` driving four faults through the real running app                                                                               | PASS   |
 
-The first CI run on this branch **failed**, on a lint error I introduced by
-committing without re-running lint. That is recorded rather than hidden: it is
-the pipeline demonstrating it blocks a red tree, which is the property the
-criterion is actually about.
+Two of the five CI runs on this branch **failed**, and both are recorded rather
+than hidden — a pipeline that has never gone red has not demonstrated it can
+block anything.
+
+Run 1 failed on a lint error committed without re-running lint. Run 3 failed on
+the budget gate: `editor.bundle.gzip` had moved to P0 while no CI step produced
+its measurement, so the gate refused to report green for a budget nobody
+measured. That is ADR-0006's central rule firing in production for the first
+time, on its own author. See RC-0004.
 
 ### Full sweep artifact
 
