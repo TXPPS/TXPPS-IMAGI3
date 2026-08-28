@@ -45,7 +45,9 @@ export default defineConfig({
     {
       command: `pnpm --filter @imagi3/editor run build && pnpm --filter @imagi3/editor exec vite preview --port ${String(PREVIEW_PORT)} --strictPort`,
       url: PREVIEW_BASE_URL,
-      reuseExistingServer: !IS_CI,
+      // Never reused: the command rebuilds before previewing, so an existing
+      // listener would silently serve — and be measured as — an older build.
+      reuseExistingServer: false,
       timeout: SERVER_START_TIMEOUT_MS,
       stdout: 'pipe',
     },
