@@ -1,0 +1,104 @@
+{
+  "currentPhase": "P0",
+  "rules": [
+    {
+      "id": "editor.coldLoad.desktop",
+      "description": "Editor cold load to interactive on a warm HTTP cache, desktop profile.",
+      "unit": "ms",
+      "scope": "desktop",
+      "max": 3000,
+      "enforcedFrom": "P0",
+      "source": "brief-4-performance"
+    },
+    {
+      "id": "editor.coldLoad.tablet",
+      "description": "Editor cold load to interactive on a warm HTTP cache, tablet profile.",
+      "unit": "ms",
+      "scope": "tablet",
+      "max": 6000,
+      "enforcedFrom": "P0",
+      "source": "brief-4-performance"
+    },
+    {
+      "id": "editor.coldLoad.phone",
+      "description": "Editor cold load to interactive, phone profile. Brief fixes desktop and tablet only; phone inherits the tablet ceiling (see ADR-0006).",
+      "unit": "ms",
+      "scope": "phone",
+      "max": 6000,
+      "enforcedFrom": "P0",
+      "source": "adr-0006"
+    },
+    {
+      "id": "runtime.bundle.gzip",
+      "description": "Engine runtime bundle, gzipped, excluding editor and user assets.",
+      "unit": "bytes",
+      "scope": "all",
+      "max": 1572864,
+      "enforcedFrom": "P1",
+      "source": "brief-4-performance"
+    },
+    {
+      "id": "playmode.fps.tablet.reference2d",
+      "description": "Sustained play-mode frame rate on the reference 2D scene, tablet profile.",
+      "unit": "fps",
+      "scope": "tablet",
+      "min": 60,
+      "enforcedFrom": "P1",
+      "source": "brief-4-performance"
+    },
+    {
+      "id": "playmode.fps.phone.reference3d",
+      "description": "Sustained play-mode frame rate floor on the reference 3D scene, phone profile.",
+      "unit": "fps",
+      "scope": "phone",
+      "min": 30,
+      "enforcedFrom": "P6",
+      "source": "brief-4-performance"
+    },
+    {
+      "id": "editor.frameSpike.max",
+      "description": "Worst single frame time observed during scene manipulation in the editor.",
+      "unit": "ms",
+      "scope": "all",
+      "max": 32,
+      "enforcedFrom": "P3",
+      "source": "brief-4-performance"
+    },
+    {
+      "id": "playmode.heap.peak.phone",
+      "description": "Peak JS heap during play mode, phone profile. Excludes GPU memory, which JS cannot observe.",
+      "unit": "bytes",
+      "scope": "phone",
+      "max": 524288000,
+      "enforcedFrom": "P6",
+      "source": "brief-4-performance"
+    },
+    {
+      "id": "gpu.texture.phone",
+      "description": "Texture and GPU buffer bytes resident, phone profile, accounted by the asset loader.",
+      "unit": "bytes",
+      "scope": "phone",
+      "max": 268435456,
+      "enforcedFrom": "P6",
+      "source": "brief-4-performance"
+    },
+    {
+      "id": "soak.heapGrowth.ratio",
+      "description": "Ratio of end-of-soak heap to post-warmup heap over a 30 minute play-mode run. Above 1.0 by more than the slack indicates a leak.",
+      "unit": "ratio",
+      "scope": "all",
+      "max": 1.1,
+      "enforcedFrom": "P3",
+      "source": "brief-4-stress"
+    },
+    {
+      "id": "editor.bundle.gzip",
+      "description": "Editor application bundle, gzipped, excluding the engine runtime chunk.",
+      "unit": "bytes",
+      "scope": "all",
+      "max": 5242880,
+      "enforcedFrom": "P3",
+      "source": "adr-0006"
+    }
+  ]
+}

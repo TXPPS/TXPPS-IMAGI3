@@ -1,0 +1,4 @@
+{
+  "$comment": "Console errors the audit harness tolerates. Every entry needs a justification and a tracking reference. An empty list is the goal state; adding to it is a deliberate, reviewable act.",
+  "entries": []
+}
