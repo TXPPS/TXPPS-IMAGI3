@@ -26,15 +26,17 @@ export const PLANTED_REJECTION_TEXT = 'IMAGI3 planted fault: unhandled-rejection
 export const SLOW_BOOT_DELAY_MS = 9000;
 
 /**
- * Work done by the cpu-regression fault, in LCG iterations.
+ * Default work for the cpu-regression fault, in LCG iterations.
  *
- * Sized from measured throttled timings so it straddles the cold-load budgets:
- * roughly 2.0s unthrottled, inside the 3s ci-headless ceiling, and roughly
- * 8.5s at the tablet's 4x throttling, well past the 6s tablet ceiling. That
- * contrast is the whole point — it is what proves a throttled budget catches a
- * regression the unthrottled one cannot see.
+ * A fallback only. The caller normally passes an iteration count computed from
+ * the host's measured speed, because a fixed count is not host-portable: sized
+ * for one machine it leaves roughly 1.3x headroom under the 3s unthrottled
+ * ceiling, so a runner a third slower flips the leg that is supposed to pass.
  */
 export const CPU_REGRESSION_ITERATIONS = 1_600_000_000;
+
+/** Query parameter carrying a host-computed iteration count. */
+export const FAULT_ITERATIONS_PARAM = 'iterations';
 
 /**
  * Numerical Recipes LCG constants, used here purely as a cheap chain of
@@ -76,8 +78,13 @@ function busyWait(durationMs: number): void {
   }
 }
 
+export interface PlantedFaultOptions {
+  /** Work for the cpu-regression fault; defaults to {@link CPU_REGRESSION_ITERATIONS}. */
+  readonly iterations?: number | undefined;
+}
+
 /** Apply a planted fault. Unknown or absent values are a no-op. */
-export function applyPlantedFault(kind: string | null): void {
+export function applyPlantedFault(kind: string | null, options: PlantedFaultOptions = {}): void {
   if (kind === null || !isFaultKind(kind)) return;
   switch (kind) {
     case 'console-error':
@@ -97,7 +104,7 @@ export function applyPlantedFault(kind: string | null): void {
       busyWait(SLOW_BOOT_DELAY_MS);
       return;
     case 'cpu-regression':
-      burnCpu(CPU_REGRESSION_ITERATIONS);
+      burnCpu(options.iterations ?? CPU_REGRESSION_ITERATIONS);
       return;
   }
 }

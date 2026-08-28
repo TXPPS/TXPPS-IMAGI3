@@ -141,7 +141,15 @@ same failure mode: **reporting an edit as done without confirming it applied.**
    and in a commit message as complete. The same failure hit the sign-off rows
    of this document, which continued to read PASS after being "changed" to
    PENDING — and that stale PASS was then quoted back to the reviewer as
-   evidence. Every edit of this kind now asserts its anchor matched.
+   evidence.
+
+   The remedy is `editFile` in `@imagi3/repo`, which fails on a stale anchor,
+   on an ambiguous one, and on a replacement that changes nothing, then reads
+   the file back to confirm what landed. **Nothing mechanically compels its
+   use** — it is a helper, not a lint rule, and a scripted edit written without
+   it can still no-op silently. What can be said is that it is used and has
+   earned its place: during P1-PRE it rejected seven stale anchors that would
+   otherwise have been silent no-ops reported as done.
 
 2. **The tree was not frozen when re-verification was requested.** Three source
    files were edited two seconds before the reviewer's end-to-end run finished,
@@ -174,40 +182,69 @@ Recorded rather than fixed, because they need work a later phase owns:
 
 ## P1-PRE — Gate verifiability
 
-**Status: CLOSED.**
+**Status: NOT CLOSED.** Both reviewers returned FAIL on the first submission.
+Every finding is fixed and re-verification is outstanding. Register 1 defines
+closure as three independent sign-offs, so this section carries none until they
+exist.
 
 **Why it exists.** P0 closed with a working harness whose device-named budgets
-could not fail for the reason they named. The phone profile measured faster than
-the desktop profile. Fixing that after building P1 on top of it would have meant
-re-deriving every budget the new code introduced, so it was made blocking.
+could not fail for the reason they named: the phone profile measured faster than
+the desktop profile, because all three were the same machine. Building P1 on
+that foundation would have meant re-deriving every budget it introduced.
 
-### Criterion evidence
+### Role sign-offs
 
-| Criterion                                                               | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                         | Status |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| CPU throttling applied and calibrated                                   | `pnpm calibrate:cpu` sweeps seven requested rates against a fixed 80M-iteration integer workload in a real page, median of five after two warmups. Rates chosen from measured slowdown: tablet 4 (4.32x), phone 6 (6.46x). Recorded in `docs/BUDGETS.md` and `profiles.ts`.                                                                                                                                                      | PASS   |
-| Profile ordering asserted                                               | `pnpm audit:profile-ordering` — two recorded local runs gave tablet 4.12x and 4.62x desktop (required 2.0x), phone 1.51x and 1.38x tablet (required 1.15x); the step also passed on GitHub Actions hardware in run 33198049464                                                                                                                                                                                                   | PASS   |
-| Ordering check is the mutation test for throttling                      | Rates forced to 1 and the suite re-run: every ratio collapsed to exactly **1.00x**, check exited 1. Restored, exited 0.                                                                                                                                                                                                                                                                                                          | PASS   |
-| Unthrottled budgets renamed honestly                                    | `editor.coldLoad.desktop` → `ci-headless.editor.coldLoad`; `real-config.test.ts` asserts no budget is named after an unthrottled profile, and that every `ci-headless.` budget says it carries no device signal                                                                                                                                                                                                                  | PASS   |
-| Deferred register populated                                             | Register 2 below, DV-001 through DV-006                                                                                                                                                                                                                                                                                                                                                                                          | PASS   |
-| Planted perf regression caught by the throttled budget and nothing else | `tests/e2e/planted-perf.spec.ts` — one recorded run: the same fixed-work regression is `passed` on the unthrottled profile (2.4s against a 3s ceiling, ~0.6s of margin) and `violated` on the throttled tablet (7.9s against a 6s ceiling, ~1.9s of margin) and phone (12.4s). The console guard reports nothing and the screenshot comparator reports no difference, so the throttled budget is the only thing that catches it. | PASS   |
-| That proof is itself load-bearing                                       | Throttling removed and the tablet leg re-run: it loaded in 2.07s, the budget returned `passed`, and the test failed with `Expected "violated"`.                                                                                                                                                                                                                                                                                  | PASS   |
+| Role               | Verdict       | SHA reviewed | Notes                                                                                                                                                     |
+| ------------------ | ------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Performance        | **FAIL**      | `26add95`    | Found that the throttling never reached the cold-load measurement path. See RC-0006.                                                                      |
+| QA Automation      | **FAIL**      | `26add95`    | 69 mutants; found the new guards had no positive controls, the ratio floors were unpinned, and this section recorded closure before any sign-off existed. |
+| Visual QA          | not requested | —            | No visual surface changed in P1-PRE. Required again at the P1 gate.                                                                                       |
+| Technical Director | withheld      | —            | Cannot close a gate whose mandatory roles have not signed.                                                                                                |
 
-### What this cost
+Both reviews ran in detached worktrees at a tagged commit, and both recorded the
+SHA. That protocol was introduced in this gate precisely because P0's reviews
+ran against a moving tree.
 
-DV-004. The desktop cold-load budget previously carried the brief's 3s desktop
-ceiling under a device name and reported green. It now reports green under a
-name that admits it measures a CI runner, and the device claim it used to imply
-sits unverified in Register 2. That is a real loss of apparent coverage and an
-exact gain in honesty.
+### The blocking finding
 
-### Note on the fixed-work regression
+**CDP throttling is per-page, and the gate measured pages that never got it.**
+The fixture threw its rate at Playwright's `page`; `sampleColdLoad` opened its
+own pages with `context.newPage()`. Measured directly by the reviewer: fixture
+page 4.75x, freshly opened page **1.02x**. All three device-named budgets were
+measured at full desktop speed, for an entire gate, while the self-test and the
+planted-regression proof stayed green on the fixture page. RC-0006 has the
+anatomy.
 
-The first design for the planted regression was a wall-clock busy-wait, which
-would have proved nothing: a spin on `performance.now()` takes the same wall
-time however slow the CPU is, so it breaches every profile equally. The fault
-performs a fixed number of arithmetic operations instead. Recorded in ADR-0011
-because it is the kind of mistake that produces a confidently green test.
+The first fix did not hold either: throttling `openPage` and verifying inside it
+meant the mutation that removed the throttling removed its verification too, and
+the suite stayed green. The check that works is the one on the artifact — the
+budget gate now rejects a device-scoped measurement that cannot evidence the
+throttling of the page it came from, as a new failing status `unthrottled`.
+
+### Findings and resolutions
+
+| #   | Raised by     | Finding                                                                      | Resolution                                                                                                    |
+| --- | ------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| 1   | Performance   | Cold-load budgets measured with zero throttling                              | `openPage` fixture, self-verifying throttling, and an artifact-level `unthrottled` gate status                |
+| 2   | Performance   | budgets.json descriptions asserted throttling that was not happening         | True as of the fix; measurements now carry the observed ratio                                                 |
+| 3   | Performance   | Planted regression sized for one host; 1.32x headroom                        | Workload computed per host from measured ms-per-iteration, targeting the geometric middle of the valid window |
+| 4   | Performance   | `ProfileBenchmark` had no provenance, so a stale file passed silently        | `recordedAt` stamped on write, `origin` recorded, both printed                                                |
+| 5   | Performance   | BUDGETS.md and GAPS.md described a median the code deliberately does not use | Corrected to the worst of three, with the reasoning                                                           |
+| 6   | QA Automation | The four new guards had no positive controls                                 | Detectors extracted as pure functions and tested against planted strays                                       |
+| 7   | QA Automation | `isCiHeadlessBudget` gated a loop with no assertion that it ran              | Iterations counted and asserted non-zero                                                                      |
+| 8   | QA Automation | `MINIMUM_RATIOS` unconstrained; 1.01 passed the suite                        | Floors pinned at 1.5x and 1.1x                                                                                |
+| 9   | QA Automation | `bench/store.ts` and `cpu-bench-page.ts` shipped untested                    | Unit tests for `median`, the rate guard, and every validation branch                                          |
+| 10  | QA Automation | `editFile` could still no-op per replacement                                 | Each replacement must change something; `count` validated; length fields documented as UTF-16 units           |
+| 11  | QA Automation | GATES.md claimed every edit asserts its anchor                               | Rewritten to say a helper exists, is used, and compels nothing                                                |
+| 12  | QA Automation | GAP-007 did not cover the new perf proof                                     | Extended to both planted-fault specs                                                                          |
+| 13  | Both          | P1-PRE recorded CLOSED with no sign-offs                                     | This section                                                                                                  |
+
+### What could not be verified
+
+QA Automation could not run Playwright — ports were reserved for the concurrent
+Performance review — so every browser-measured figure in this section rests on
+the Performance review and on CI, not on two independent runs. The reviewer said
+so rather than guessing, which is the behaviour the register is for.
 
 ---
 

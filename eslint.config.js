@@ -21,6 +21,7 @@ export default tseslint.config(
       '**/test-results/**',
       '**/playwright-report/**',
       '**/.audit-out/**',
+      '.edits/**',
       '**/screenshots/**',
       '**/*.tsbuildinfo',
     ],

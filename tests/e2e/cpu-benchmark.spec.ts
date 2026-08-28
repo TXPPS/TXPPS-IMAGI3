@@ -24,7 +24,12 @@ test.describe('cpu throttling', () => {
     const medianMs = await medianCpuBenchmark(page);
 
     writeProfileBenchmark(
-      { profile: profile.id, medianMs, requestedRate: profile.cpuThrottlingRate },
+      {
+        profile: profile.id,
+        medianMs,
+        requestedRate: profile.cpuThrottlingRate,
+        origin: 'tests/e2e/cpu-benchmark.spec.ts',
+      },
       join(REPO_ROOT, BENCHMARK_DIR),
     );
 

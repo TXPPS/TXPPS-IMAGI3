@@ -1,8 +1,9 @@
 // @vitest-environment node
 import { readdirSync, statSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { findDeclarationMaps, findStrayDeclarations } from '../src/stray-declarations.ts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const SOURCE_ROOTS = ['tools', 'apps', 'tests'];
@@ -40,6 +41,43 @@ function allSourceFiles(): string[] {
  * sibling. That distinction is what this checks, so genuine declarations stay
  * legal and generated ones cannot be committed.
  */
+describe('findStrayDeclarations', () => {
+  it('flags a declaration sitting beside a source of the same name', () => {
+    expect(findStrayDeclarations(['a/src/phases.ts', 'a/src/phases.d.ts'])).toEqual([
+      'a/src/phases.d.ts',
+    ]);
+  });
+
+  it('leaves a hand-written declaration with no generating source alone', () => {
+    expect(findStrayDeclarations(['tests/e2e/globals.d.ts', 'tests/e2e/other.ts'])).toEqual([]);
+  });
+
+  it('does not confuse same-named files in different directories', () => {
+    expect(findStrayDeclarations(['a/x.ts', 'b/x.d.ts'])).toEqual([]);
+  });
+
+  it('finds every stray, not just the first', () => {
+    expect(findStrayDeclarations(['a.ts', 'a.d.ts', 'b.ts', 'b.d.ts'])).toEqual([
+      'a.d.ts',
+      'b.d.ts',
+    ]);
+  });
+
+  it('returns nothing for a clean list', () => {
+    expect(findStrayDeclarations(['a.ts', 'b.ts'])).toEqual([]);
+  });
+});
+
+describe('findDeclarationMaps', () => {
+  it('flags a declaration source map', () => {
+    expect(findDeclarationMaps(['a/src/x.d.ts.map'])).toEqual(['a/src/x.d.ts.map']);
+  });
+
+  it('ignores ordinary source maps and sources', () => {
+    expect(findDeclarationMaps(['a.js.map', 'a.ts', 'a.d.ts'])).toEqual([]);
+  });
+});
+
 describe('generated declaration output', () => {
   const files = allSourceFiles();
 
@@ -48,17 +86,22 @@ describe('generated declaration output', () => {
   });
 
   it('leaves no declaration file beside the source it was generated from', () => {
-    const strays = files.filter((file) => {
-      if (!file.endsWith('.d.ts')) return false;
-      const sibling = join(dirname(file), `${basename(file, '.d.ts')}.ts`);
-      return files.includes(sibling);
-    });
-    expect(strays.map((f) => f.slice(REPO_ROOT.length + 1))).toEqual([]);
+    expect(findStrayDeclarations(files).map((f) => f.slice(REPO_ROOT.length + 1))).toEqual([]);
   });
 
   it('leaves no declaration source map outside a build directory', () => {
-    const strays = files.filter((file) => file.endsWith('.d.ts.map'));
-    expect(strays.map((f) => f.slice(REPO_ROOT.length + 1))).toEqual([]);
+    expect(findDeclarationMaps(files).map((f) => f.slice(REPO_ROOT.length + 1))).toEqual([]);
+  });
+
+  it('still scans the directories the strays actually landed in', () => {
+    // Adding 'src' to the skip list would silence this guard entirely while
+    // leaving it green; naming the real directories stops that.
+    for (const marker of ['tools/audit/src', 'apps/editor/src', 'tests/e2e']) {
+      expect(
+        files.some((f) => f.includes(marker)),
+        `nothing scanned under ${marker}`,
+      ).toBe(true);
+    }
   });
 
   it('still permits a hand-written declaration with no generating source', () => {

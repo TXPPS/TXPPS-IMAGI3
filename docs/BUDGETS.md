@@ -53,8 +53,8 @@ for the same id, letting a targeted re-run supersede an earlier value.
 ## How cold load is measured
 
 Cold load is the later of the app's own readiness mark and the browser's first
-contentful paint, taken as the median of three navigations on fresh pages after
-one warm-up navigation.
+contentful paint, taken as the **worst** of three navigations on fresh pages
+after one warm-up navigation.
 
 Each of those choices exists to close a specific hole:
 
@@ -64,8 +64,18 @@ Each of those choices exists to close a specific hole:
 - **Fresh pages, not `location.reload()`**, because a reload keeps the renderer
   process, its code cache and its connection alive, which is not the condition
   the budget is stated against.
-- **A median of three**, because a single sample is noise once a budget stops
-  having two orders of magnitude of headroom.
+- **The worst of three, not the median.** A median suppresses the tail rather
+  than exposing it — samples of 20/20/3000 ms report 20 — which is the wrong
+  direction for a gate whose job is catching regressions. A single sample is
+  noise; a median is forgiving; the maximum is the conservative reduction.
+- **Throttling proven on each sampled page.** Every page is opened through a
+  fixture that applies the profile's CPU throttling and then measures it on
+  that page, and the observed ratio is recorded alongside the measurement. The
+  budget gate rejects a device-scoped measurement whose recorded ratio is
+  missing or near 1.0x. That is not belt-and-braces: CDP throttling is
+  per-page, and an earlier version of this harness throttled only the fixture
+  page while the spec measured pages it opened itself, so every device-named
+  budget was measured at full desktop speed. See RC-0006.
 
 ## CPU throttling, and how the rates were chosen
 

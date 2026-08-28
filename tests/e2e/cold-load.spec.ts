@@ -1,8 +1,8 @@
 import type { Page } from '@playwright/test';
 import { READY_ATTRIBUTE, READY_MARK } from '../../apps/editor/src/constants.ts';
-import { COLD_LOAD_BUDGET_IDS } from '@imagi3/audit';
+import { COLD_LOAD_BUDGET_IDS, type PageIncident } from '@imagi3/audit';
 import { recordMeasurements, ruleFor } from './budget.ts';
-import { expect, test } from './fixtures.ts';
+import { expect, test, throttlingFor, type OpenThrottledPage } from './fixtures.ts';
 import { installIncidentCapture } from './incidents.ts';
 
 /** Samples per profile; the gate takes the worst of them. */
@@ -59,17 +59,46 @@ function worst(values: readonly number[]): number {
  * Each sample runs on a fresh page rather than a reload. A reload keeps the
  * renderer process, its code cache and its connection alive, which is not the
  * condition the budget is stated against.
+ *
+ * The page comes from `openPage`, never `context.newPage()`. CDP throttling is
+ * per-page, so a directly opened page carries none — which is how every
+ * device-named budget here was measured unthrottled for an entire gate, while
+ * the throttling self-test stayed green because it ran on a different page.
+ * See RC-0006.
  */
-async function sampleColdLoad(page: Page, incidents: unknown[]): Promise<number> {
-  const fresh = await page.context().newPage();
+interface ColdLoadSample {
+  readonly elapsedMs: number;
+  /** Throttling measured on the page this sample came from. */
+  readonly throttleRatio: number;
+}
+
+async function sampleColdLoad(
+  open: OpenThrottledPage,
+  incidents: PageIncident[],
+  expectedRate: number,
+): Promise<ColdLoadSample> {
+  const fresh = await open();
   const freshIncidents = await installIncidentCapture(fresh);
   try {
+    // Evidence is demanded of the page that produced the number, not of the
+    // helper that opened it. A page nobody verified carries no throttling
+    // record, and that absence fails here rather than reaching the budget gate
+    // as a suspiciously fast result.
+    const verification = throttlingFor(fresh);
+    expect(
+      verification,
+      'the sampled page carries no throttling verification, so its timing means nothing',
+    ).toBeDefined();
+    expect(verification?.requestedRate).toBe(expectedRate);
+
     await fresh.goto('/');
     await expect(fresh.locator(`html[${READY_ATTRIBUTE}="true"]`)).toBeAttached();
-    return coldLoadMs(await readTimings(fresh));
+    return {
+      elapsedMs: coldLoadMs(await readTimings(fresh)),
+      throttleRatio: verification?.observedRatio ?? Number.NaN,
+    };
   } finally {
     incidents.push(...freshIncidents);
-    await fresh.close();
   }
 }
 
@@ -78,17 +107,21 @@ test.describe('cold load', () => {
     page,
     profile,
     incidents,
+    openPage,
   }) => {
     // First navigation warms the HTTP cache; the budget is stated against a
     // warm cache, so it is not itself a sample.
     await page.goto('/');
     await expect(page.locator(`html[${READY_ATTRIBUTE}="true"]`)).toBeAttached();
 
-    const samples: number[] = [];
+    const samples: ColdLoadSample[] = [];
     for (let i = 0; i < SAMPLE_COUNT; i += 1) {
-      samples.push(await sampleColdLoad(page, incidents));
+      samples.push(await sampleColdLoad(openPage, incidents, profile.cpuThrottlingRate));
     }
-    const elapsedMs = worst(samples);
+    const elapsedMs = worst(samples.map((s) => s.elapsedMs));
+    // The weakest throttling any sampled page showed, so the recorded evidence
+    // describes the worst case rather than the most flattering one.
+    const throttleRatio = Math.min(...samples.map((s) => s.throttleRatio));
 
     const budgetId = COLD_LOAD_BUDGET_IDS[profile.id];
     const rule = ruleFor(budgetId);
@@ -102,6 +135,7 @@ test.describe('cold load', () => {
         id: budgetId,
         value: elapsedMs,
         origin: `tests/e2e/cold-load.spec.ts worst of ${String(SAMPLE_COUNT)}`,
+        throttleRatio,
       },
     ]);
 
@@ -109,9 +143,9 @@ test.describe('cold load', () => {
     expect(elapsedMs).toBeGreaterThan(0);
     expect(
       elapsedMs,
-      `${profile.label} cold load ${elapsedMs.toFixed(1)}ms (samples ${samples
-        .map((s) => s.toFixed(1))
-        .join(', ')}) exceeds the ${String(ceiling)}ms budget`,
+      `${profile.label} cold load ${elapsedMs.toFixed(1)}ms at ${throttleRatio.toFixed(2)}x ` +
+        `throttling (samples ${samples.map((s) => s.elapsedMs.toFixed(1)).join(', ')}) ` +
+        `exceeds the ${String(ceiling)}ms budget`,
     ).toBeLessThanOrEqual(ceiling);
   });
 });

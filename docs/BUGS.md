@@ -159,3 +159,53 @@ rather than by exact whitespace.
 **Prevention:** re-read the region after an edit that matters, and never report
 an edit as applied on the strength of the command having exited zero. The
 review caught this; the tooling should have.
+
+### RC-0006 — Throttling applied to a page the gate never measured
+
+**Found:** P1-PRE, by the independent Performance review.
+**Severity:** P0 (the gate's entire subject matter was unfixed while reported fixed).
+
+P1-PRE existed to fix one defect: budgets named for a tablet and a phone were
+measured on unthrottled hardware, proven at P0 by the phone profile measuring
+_faster_ than the desktop profile. CPU throttling was added, calibrated, given a
+self-test, given a planted-regression proof, and recorded as closed.
+
+**The throttling never reached the budgets.** CDP throttling is per-page. The
+fixture applied it to Playwright's `page`, but `sampleColdLoad` opened its own
+pages with `context.newPage()`, which inherit nothing. Every cold-load
+measurement — all three device-named budgets, the whole point of the gate — was
+taken at full desktop speed. The reviewer measured it directly: a throttled page
+at 4.75x, a page from `context.newPage()` on the same context at 1.02x.
+
+The fixture's own docstring stated the contract the spec broke: _"Fresh pages
+opened inside a test must call `applyCpuThrottling` themselves."_ Nothing did.
+
+**Why every guard stayed green.** The profile-ordering self-test and the
+planted-regression proof both ran on the fixture page, which _was_ throttled.
+Each was individually load-bearing — the reviewer confirmed both fail when the
+rates are forced to 1 — and both were verifying a code path the gate did not
+use. A mutation test can only tell you about the path it exercises.
+
+**Fix, in three layers, because one was what failed:**
+
+1. Pages are opened through an `openPage` fixture that throttles them. Removing
+   the opportunity to forget, rather than documenting the requirement.
+2. Throttling verifies itself on the page it is applied to: the same workload
+   runs before and after, and a slowdown that never arrives throws.
+3. The budget gate refuses a device-scoped measurement that cannot show the page
+   it came from was throttled. `throttleRatio` is recorded with each
+   measurement, and a missing or near-1.0x ratio is a new failing status,
+   `unthrottled`, alongside `unmeasured`.
+
+Layer 3 is the one that matters. Layers 1 and 2 live inside the code path being
+checked — the first mutation test proved it, because deleting the throttling
+from `openPage` deleted its verification too and the suite stayed green. The
+gate checks the _artifact_: a number that cannot evidence its own provenance is
+rejected regardless of what produced it, or failed to.
+
+**Wider lesson, and it is the same one as RC-0003 and RC-0002 in a new
+costume:** a guard that lives in the path it guards can be removed by the same
+edit that introduces the defect. Ask not "does this check fire when I break the
+thing" but "does this check survive an edit that removes both the thing and the
+check". Assertions about an artifact survive that; assertions inside a helper do
+not.

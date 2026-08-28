@@ -49,7 +49,7 @@ test.describe('planted faults', () => {
     });
   }
 
-  test('budget gate catches a planted slow boot', async ({ page, profile }) => {
+  test('budget gate catches a planted slow boot', async ({ page, profile, throttle }) => {
     await page.goto(`${DEV_BASE_URL}/?plant=slow-boot`);
     await expect(page.locator(`html[${READY_ATTRIBUTE}="true"]`)).toBeAttached();
     const elapsedMs = await page.evaluate((mark) => {
@@ -59,7 +59,11 @@ test.describe('planted faults', () => {
     }, READY_MARK);
 
     const budgetId = COLD_LOAD_BUDGET_IDS[profile.id];
-    const report = checkBudgets(loadBudgets(), [{ id: budgetId, value: elapsedMs }]);
+    // The throttling evidence is required: the gate rejects a device-scoped
+    // measurement that cannot show the page it came from was throttled.
+    const report = checkBudgets(loadBudgets(), [
+      { id: budgetId, value: elapsedMs, throttleRatio: throttle.observedRatio },
+    ]);
     const result = report.results.find((r) => r.rule.id === budgetId);
 
     expect(
@@ -72,7 +76,9 @@ test.describe('planted faults', () => {
     // report is not-ok regardless of the planted fault and asserting it would
     // pass no matter what. Re-checking the same rule with a plausible value is
     // what actually proves the checker responds to the value.
-    const control = checkBudgets(loadBudgets(), [{ id: budgetId, value: 25 }]);
+    const control = checkBudgets(loadBudgets(), [
+      { id: budgetId, value: 25, throttleRatio: throttle.observedRatio },
+    ]);
     expect(control.results.find((r) => r.rule.id === budgetId)?.status).toBe('passed');
   });
 

@@ -1,6 +1,12 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeviceProfileId } from '../profiles.ts';
+import {
+  asRecord,
+  optionalString,
+  requireFiniteNumber,
+  requireNonEmptyString,
+} from '../validate.ts';
 import type { ProfileBenchmark } from './ordering.ts';
 
 /**
@@ -20,24 +26,19 @@ export class BenchmarkError extends Error {
 }
 
 export function parseProfileBenchmark(raw: unknown, where: string): ProfileBenchmark {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new BenchmarkError(`${where} must be an object`);
-  }
-  const record = raw as Record<string, unknown>;
-  const profile = record['profile'];
-  const medianMs = record['medianMs'];
-  const requestedRate = record['requestedRate'];
-
-  if (typeof profile !== 'string' || !isDeviceProfileId(profile)) {
+  const fail = (message: string): Error => new BenchmarkError(message);
+  const record = asRecord(raw, where, fail);
+  const profile = requireNonEmptyString(record, 'profile', where, fail);
+  if (!isDeviceProfileId(profile)) {
     throw new BenchmarkError(`${where}.profile must be a device profile id`);
   }
-  if (typeof medianMs !== 'number' || !Number.isFinite(medianMs)) {
-    throw new BenchmarkError(`${where}.medianMs must be a finite number`);
-  }
-  if (typeof requestedRate !== 'number' || !Number.isFinite(requestedRate)) {
-    throw new BenchmarkError(`${where}.requestedRate must be a finite number`);
-  }
-  return { profile, medianMs, requestedRate };
+  return {
+    profile,
+    medianMs: requireFiniteNumber(record, 'medianMs', where, fail),
+    requestedRate: requireFiniteNumber(record, 'requestedRate', where, fail),
+    recordedAt: optionalString(record, 'recordedAt', where, fail),
+    origin: optionalString(record, 'origin', where, fail),
+  };
 }
 
 export function writeProfileBenchmark(
@@ -45,8 +46,12 @@ export function writeProfileBenchmark(
   directory: string = BENCHMARK_DIR,
 ): string {
   mkdirSync(directory, { recursive: true });
+  const stamped: ProfileBenchmark = {
+    ...benchmark,
+    recordedAt: benchmark.recordedAt ?? new Date().toISOString(),
+  };
   const path = join(directory, `${benchmark.profile}${FILE_SUFFIX}`);
-  writeFileSync(path, `${JSON.stringify(benchmark, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify(stamped, null, 2)}\n`);
   return path;
 }
 

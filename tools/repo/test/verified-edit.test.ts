@@ -24,7 +24,7 @@ describe('editFile', () => {
 
     expect(readFileSync(path, 'utf8')).toBe('alpha\nBETA!\ngamma\n');
     expect(outcome.applied).toBe(1);
-    expect(outcome.sizeAfter).toBeGreaterThan(outcome.sizeBefore);
+    expect(outcome.lengthAfter).toBeGreaterThan(outcome.lengthBefore);
   });
 
   it('applies several replacements in order', () => {
@@ -63,7 +63,7 @@ describe('editFile', () => {
 
   it('refuses an edit that would change nothing', () => {
     const path = fixture('same\n');
-    expect(() => editFile(path, [{ find: 'same', replace: 'same' }])).toThrow(/no-op/);
+    expect(() => editFile(path, [{ find: 'same', replace: 'same' }])).toThrow(/changes nothing/);
   });
 
   it('refuses an empty replacement list', () => {
@@ -142,5 +142,59 @@ describe('presence assertions', () => {
     expect(() => {
       requireAbsent(path, ['expect(report.ok)']);
     }).not.toThrow();
+  });
+});
+
+/**
+ * A review found three ways a replacement could ride along in a batch without
+ * changing anything, while `editFile` reported it as applied. The realistic
+ * RC-0005 shape was always caught; these are the hardening cases.
+ */
+describe('editFile rejects replacements that cannot do anything', () => {
+  it('refuses a count of zero, which would legally match nothing', () => {
+    const path = fixture('alpha\n');
+    expect(() => editFile(path, [{ find: 'gone', replace: 'x', count: 0 }])).toThrow(
+      /count must be a positive integer/,
+    );
+  });
+
+  it('refuses a negative count instead of reporting "expected -1"', () => {
+    const path = fixture('alpha\n');
+    expect(() => editFile(path, [{ find: 'alpha', replace: 'x', count: -1 }])).toThrow(
+      /count must be a positive integer/,
+    );
+  });
+
+  it('refuses a fractional count', () => {
+    const path = fixture('alpha\n');
+    expect(() => editFile(path, [{ find: 'alpha', replace: 'x', count: 1.5 }])).toThrow(EditError);
+  });
+
+  it('refuses an identical find and replace even beside an effective one', () => {
+    const path = fixture('alpha beta\n');
+    expect(() =>
+      editFile(path, [
+        { find: 'alpha', replace: 'ALPHA' },
+        { find: 'beta', replace: 'beta' },
+      ]),
+    ).toThrow(/changes nothing/);
+    expect(readFileSync(path, 'utf8')).toBe('alpha beta\n');
+  });
+
+  it('reports only replacements it verified changed the text', () => {
+    const path = fixture('alpha beta\n');
+    const outcome = editFile(path, [
+      { find: 'alpha', replace: 'A' },
+      { find: 'beta', replace: 'B' },
+    ]);
+    expect(outcome.applied).toBe(2);
+    expect(outcome.lengthAfter).toBeLessThan(outcome.lengthBefore);
+  });
+
+  it('still applies a same-length substitution, which length alone cannot detect', () => {
+    const path = fixture('abc\n');
+    const outcome = editFile(path, [{ find: 'abc', replace: 'xyz' }]);
+    expect(readFileSync(path, 'utf8')).toBe('xyz\n');
+    expect(outcome.lengthAfter).toBe(outcome.lengthBefore);
   });
 });

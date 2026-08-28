@@ -12,3 +12,4 @@ screenshots/actual/
 screenshots/diff/
 dist-types/
 *.d.ts.map
+.edits/

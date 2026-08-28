@@ -150,15 +150,22 @@ asset upload interrupted partway.
 **Status:** NARROWED in P1-PRE, still open. **Blocks:** honest sign-off of any
 device-specific performance claim, including the P5 and P6 gates.
 
-**What P1-PRE fixed.** The tablet and phone profiles now run under calibrated
-CPU throttling (4x and 6x, measured 4.3x and 6.5x), and `pnpm
-audit:profile-ordering` asserts on every run that the profiles come out in the
-right order — removing throttling collapses every ratio to 1.00x and fails the
-check. The unthrottled desktop budget was renamed `ci-headless.editor.coldLoad`
-so it no longer asserts a device claim, and the real desktop claim moved to the
-DEVICE-VERIFIED register as DV-004. A planted fixed-work CPU regression is now
-proven to pass the unthrottled budget and breach the throttled one. See
-ADR-0011.
+**What P1-PRE fixed**, at the second attempt. The first attempt did not: CPU
+throttling was applied to Playwright's fixture page while the cold-load spec
+measured pages it opened itself, so every device-named budget was still taken at
+full desktop speed. The independent Performance review caught it. See RC-0006.
+
+As it now stands: the tablet and phone profiles run under calibrated CPU
+throttling (4x and 6x, measured 4.3x and 6.5x); every page the harness measures
+is opened through a fixture that throttles it and then verifies the throttling
+on that page; each measurement records the ratio observed, and the budget gate
+rejects a device-scoped measurement whose ratio is missing or near 1.0x.
+`pnpm audit:profile-ordering` separately asserts the profiles come out in the
+right order, and removing throttling collapses every ratio to 1.00x and fails
+it. The unthrottled desktop budget was renamed `ci-headless.editor.coldLoad`,
+and the real desktop claim moved to the DEVICE-VERIFIED register as DV-004. A
+planted fixed-work CPU regression, sized per host, passes the unthrottled budget
+and breaches the throttled ones. See ADR-0011.
 
 **What remains open**, and it is still substantial:
 
@@ -178,9 +185,9 @@ Four specific limits:
    Cold load is `max(readiness mark, first contentful paint)`. Work deferred
    past first paint — into a microtask, an idle callback, or a later frame — is
    not counted. There is no long-task observation yet.
-4. **Single median of three samples per profile**, with no percentile and no
-   run-to-run variance tracking. Adequate while measurements sit far inside
-   their ceiling; not adequate once a budget becomes load-bearing.
+4. **Worst of three samples per profile**, with no percentile and no run-to-run
+   variance tracking. Adequate while measurements sit far inside their ceiling;
+   not adequate once a budget becomes load-bearing.
 
 **Consequence:** a green `editor.coldLoad.phone` row means "the shell loads
 quickly on a developer machine at phone viewport". It does not mean the editor
@@ -202,16 +209,21 @@ latency is the largest remaining emulation error for a cold load.
 
 ---
 
-## GAP-007 — The planted slow-boot proof runs against the dev server
+## GAP-007 — The planted-fault proofs run against the dev server
 
 **Status:** open, structural. **Severity:** low, but worth stating.
 
-Fault injection exists only in development builds by design (ADR-0009), so
-`tests/e2e/planted-fault.spec.ts` provokes its slow boot against the dev server
-on port 5173, while the gated cold-load measurement runs against the production
-preview on 4173. The test therefore proves the budget _checker_ rejects an
-over-budget value in a real browser. It does not prove the production
-measurement pipeline would carry such a value through to the gate.
+Fault injection exists only in development builds by design (ADR-0009), so both
+`tests/e2e/planted-fault.spec.ts` (slow boot) and
+`tests/e2e/planted-perf.spec.ts` (the P1-PRE throttling proof) provoke their
+faults against the dev server on port 5173, while the gated cold-load
+measurement runs against the production preview on 4173.
+
+Those tests prove the budget _checker_ rejects an over-budget value in a real
+browser, and — for the perf proof — that the verdict differs by throttling.
+Neither proves the production measurement pipeline would carry such a value
+through to the gate. The dev server is also the slower environment, which cuts
+the safe way for the throttled legs and the unsafe way for the unthrottled one.
 
 **To close:** once the editor has a real feature surface (P3), add a deliberate
 regression to a production build behind a build-time flag and confirm the gate

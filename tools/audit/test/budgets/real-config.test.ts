@@ -101,16 +101,26 @@ describe('the committed budgets.json', () => {
  * its own id.
  */
 describe('device naming honesty', () => {
-  it('gives every unthrottled budget the ci-headless prefix', () => {
+  it('makes every ci-headless budget declare that it carries no device signal', () => {
+    let checked = 0;
     for (const budgetRule of document.rules) {
       if (!isCiHeadlessBudget(budgetRule.id)) continue;
+      checked += 1;
       expect(budgetRule.description).toMatch(/NO device signal/i);
     }
+    // Without this, a one-character typo in the prefix constant silences the
+    // assertion entirely and the test still passes, having checked nothing.
+    expect(
+      checked,
+      'no ci-headless budget was examined; the predicate matched nothing',
+    ).toBeGreaterThan(0);
   });
 
   it('names no budget after a device profile that runs unthrottled', () => {
+    let checked = 0;
     for (const [profileId, profile] of Object.entries(DEVICE_PROFILES)) {
       if (profile.cpuThrottlingRate > 1) continue;
+      checked += 1;
       const named = document.rules.filter(
         (r) => r.id.includes(`.${profileId}`) && !isCiHeadlessBudget(r.id),
       );
@@ -119,6 +129,7 @@ describe('device naming honesty', () => {
         `${profileId} is unthrottled, so a budget named after it would claim a device signal it does not have`,
       ).toEqual([]);
     }
+    expect(checked, 'no unthrottled profile was examined').toBeGreaterThan(0);
   });
 
   it('maps every profile to a declared cold-load budget', () => {

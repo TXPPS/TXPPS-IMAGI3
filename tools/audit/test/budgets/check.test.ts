@@ -83,7 +83,13 @@ describe('checkBudgets', () => {
         { id: 'b', value: 1000 },
       ],
     );
-    expect(report.counts).toEqual({ passed: 1, violated: 1, unmeasured: 1, deferred: 1 });
+    expect(report.counts).toEqual({
+      passed: 1,
+      violated: 1,
+      unmeasured: 1,
+      unthrottled: 0,
+      deferred: 1,
+    });
   });
 });
 
@@ -94,5 +100,60 @@ describe('findOrphanMeasurements', () => {
       { id: 'ghost', value: 2 },
     ]);
     expect(orphans).toEqual(['ghost']);
+  });
+});
+
+/**
+ * A device-scoped budget measured on an unthrottled page is not a lenient
+ * result, it is a meaningless one. This is the artifact-level half of the
+ * guarantee: the browser harness proves throttling on the page, and the gate
+ * proves the recorded number came from such a page.
+ *
+ * Without it, RC-0006 was invisible — every device-named budget was measured at
+ * full desktop speed while the throttling self-test stayed green, because the
+ * self-test ran on a different page.
+ */
+describe('throttling evidence', () => {
+  const tabletRule = rule({ id: 'demo.tablet', scope: 'tablet' });
+  const doc = document([tabletRule]);
+
+  it('accepts a device-scoped measurement carrying adequate throttling', () => {
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttleRatio: 3.7 }]);
+    expect(report.results[0]!.status).toBe('passed');
+    expect(report.ok).toBe(true);
+  });
+
+  it('rejects a device-scoped measurement with no throttling record at all', () => {
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50 }]);
+    expect(report.results[0]!.status).toBe('unthrottled');
+    expect(report.results[0]!.detail).toContain('records no throttleRatio');
+    expect(report.ok).toBe(false);
+  });
+
+  it('rejects a device-scoped measurement taken at desktop speed', () => {
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttleRatio: 1 }]);
+    expect(report.results[0]!.status).toBe('unthrottled');
+    expect(report.ok).toBe(false);
+  });
+
+  it('rejects a non-finite throttling record', () => {
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttleRatio: Number.NaN }]);
+    expect(report.results[0]!.status).toBe('unthrottled');
+  });
+
+  it('does not demand throttling evidence from an unthrottled scope', () => {
+    const desktop = document([rule({ id: 'demo.desktop', scope: 'desktop' })]);
+    expect(checkBudgets(desktop, [{ id: 'demo.desktop', value: 50 }]).ok).toBe(true);
+  });
+
+  it('does not demand throttling evidence from a device-independent budget', () => {
+    const anywhere = document([rule({ id: 'demo.all', scope: 'all' })]);
+    expect(checkBudgets(anywhere, [{ id: 'demo.all', value: 50 }]).ok).toBe(true);
+  });
+
+  it('reports an unthrottled measurement as failing, not merely as a note', () => {
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50 }]);
+    expect(report.counts.unthrottled).toBe(1);
+    expect(report.counts.passed).toBe(0);
   });
 });

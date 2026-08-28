@@ -1,7 +1,19 @@
-import { test as base, expect } from '@playwright/test';
+import { test as base, expect, type Page } from '@playwright/test';
 import { DEVICE_PROFILES, type DeviceProfile, type PageIncident } from '@imagi3/audit';
-import { applyCpuThrottling } from '@imagi3/repo';
+import { applyVerifiedCpuThrottling, type ThrottleVerification } from '@imagi3/repo';
 import { describeViolations, installIncidentCapture, judgeIncidents } from './incidents.ts';
+
+/** Opens a page that is guaranteed to carry this profile's CPU throttling. */
+export type OpenThrottledPage = () => Promise<Page>;
+
+/**
+ * Throttling measured per page.
+ *
+ * A map rather than a fixture depending on a fixture: `page` must apply the
+ * throttling, and `throttle` must report what `page` measured, which as two
+ * mutually dependent fixtures is a cycle Playwright rejects outright.
+ */
+const verifiedThrottling = new WeakMap<Page, ThrottleVerification>();
 
 interface AuditFixtures {
   /** Live list of failure signals the page emitted during the test. */
@@ -13,6 +25,27 @@ interface AuditFixtures {
   readonly allowIncidents: boolean;
   /** Device profile this project emulates, resolved from the Playwright project name. */
   readonly profile: DeviceProfile;
+  /** Throttling actually measured on the fixture page. */
+  readonly throttle: ThrottleVerification;
+  /**
+   * Open an additional page carrying this profile's throttling.
+   *
+   * CDP throttling is per-page, so a page opened with `context.newPage()`
+   * inherits nothing. Every such page in the suite is opened through here, and
+   * pages are closed at teardown, so no spec has to remember either.
+   */
+  readonly openPage: OpenThrottledPage;
+}
+
+/**
+ * Throttling verified for a page, or undefined if it was never verified.
+ *
+ * Exposed so a spec can demand evidence about the exact page it measured,
+ * rather than trusting whatever opened it. The producer proving its own work is
+ * how RC-0006 stayed invisible.
+ */
+export function throttlingFor(page: Page): ThrottleVerification | undefined {
+  return verifiedThrottling.get(page);
 }
 
 export const test = base.extend<AuditFixtures>({
@@ -30,17 +63,41 @@ export const test = base.extend<AuditFixtures>({
   },
 
   /**
-   * Every page in every test carries its profile's CPU throttling.
+   * Every page in every test carries its profile's CPU throttling, and proves
+   * it: the rate is applied and then measured on the page itself.
    *
    * Overriding the built-in `page` fixture rather than throttling per-test is
-   * deliberate: a per-test opt-in is a per-test opportunity to forget, and a
-   * profile named for a phone that quietly runs at desktop speed measures
-   * nothing. Fresh pages opened inside a test must call
-   * `applyCpuThrottling` themselves — CDP throttling is per-page.
+   * deliberate — a per-test opt-in is a per-test opportunity to forget. That is
+   * not hypothetical: the first version of this shipped throttling on the
+   * fixture page only, while the cold-load spec measured pages it opened
+   * itself, so every device-named budget was unthrottled. See RC-0006.
    */
   page: async ({ page, profile }, use) => {
-    await applyCpuThrottling(page, profile.cpuThrottlingRate);
+    verifiedThrottling.set(page, await applyVerifiedCpuThrottling(page, profile.cpuThrottlingRate));
     await use(page);
+  },
+
+  throttle: async ({ page }, use) => {
+    const verification = verifiedThrottling.get(page);
+    if (verification === undefined) {
+      throw new Error('the page fixture did not record its throttling verification');
+    }
+    await use(verification);
+  },
+
+  openPage: async ({ page, profile }, use) => {
+    const opened: Page[] = [];
+    const open: OpenThrottledPage = async () => {
+      const fresh = await page.context().newPage();
+      verifiedThrottling.set(
+        fresh,
+        await applyVerifiedCpuThrottling(fresh, profile.cpuThrottlingRate),
+      );
+      opened.push(fresh);
+      return fresh;
+    };
+    await use(open);
+    for (const fresh of opened) await fresh.close();
   },
 
   incidents: async ({ page, allowIncidents }, use) => {

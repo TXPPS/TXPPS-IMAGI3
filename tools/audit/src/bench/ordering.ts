@@ -10,8 +10,18 @@ import { DEVICE_PROFILE_IDS, DEVICE_PROFILES, type DeviceProfileId } from '../pr
 export interface ProfileBenchmark {
   readonly profile: DeviceProfileId;
   readonly medianMs: number;
-  /** Rate requested of CDP, recorded so a mismatch with the profile is visible. */
+  /**
+   * Rate the harness asked CDP for.
+   *
+   * A harness writing this from the profile itself cannot disagree with the
+   * profile, so this does not detect a live mismatch. What it does detect is a
+   * stale artifact: a benchmark file written before `CPU_THROTTLING` changed.
+   */
   readonly requestedRate: number;
+  /** ISO timestamp, so a file left over from an earlier run is visible. */
+  readonly recordedAt?: string | undefined;
+  /** What produced this measurement. */
+  readonly origin?: string | undefined;
 }
 
 /**
@@ -61,6 +71,8 @@ export interface OrderingReport {
   readonly missing: readonly DeviceProfileId[];
   /** Profiles whose reported rate disagrees with their declared rate. */
   readonly rateMismatches: readonly string[];
+  /** The benchmarks the verdict was computed from, for provenance reporting. */
+  readonly benchmarks: readonly ProfileBenchmark[];
 }
 
 const RATIO_DECIMALS = 2;
@@ -132,6 +144,7 @@ export function checkProfileOrdering(benchmarks: readonly ProfileBenchmark[]): O
     pairs,
     missing,
     rateMismatches,
+    benchmarks,
   };
 }
 
@@ -139,6 +152,13 @@ export function formatOrderingReport(report: OrderingReport): string {
   const lines = ['Profile ordering (CPU throttling verification)'];
   for (const pair of report.pairs) {
     lines.push(`  ${pair.ok ? 'PASS ' : 'FAIL '} ${pair.detail}`);
+  }
+  for (const benchmark of report.benchmarks) {
+    const provenance = [benchmark.origin, benchmark.recordedAt].filter(
+      (part): part is string => part !== undefined && part.length > 0,
+    );
+    if (provenance.length === 0) continue;
+    lines.push(`        ${benchmark.profile} via ${provenance.join(' at ')}`);
   }
   for (const profile of report.missing) {
     lines.push(`  MISS  ${profile} reported no benchmark`);

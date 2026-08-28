@@ -26,7 +26,7 @@ export interface Replacement {
   /** Exact text expected in the file. Must appear at least once. */
   readonly find: string;
   readonly replace: string;
-  /** Expected occurrence count. Defaults to exactly one. */
+  /** Expected occurrence count. Defaults to exactly one; must be at least one. */
   readonly count?: number | undefined;
 }
 
@@ -49,6 +49,15 @@ function excerpt(text: string): string {
 
 function applyOne(source: string, replacement: Replacement, where: string): string {
   const expected = replacement.count ?? 1;
+  if (!Number.isInteger(expected) || expected < 1) {
+    throw new EditError(
+      `${where}: count must be a positive integer, got ${String(expected)}. ` +
+        'A count of zero would make the replacement legally match nothing.',
+    );
+  }
+  if (replacement.find === replacement.replace) {
+    throw new EditError(`${where}: find and replace are identical, so this changes nothing`);
+  }
   const found = countOccurrences(source, replacement.find);
   if (found !== expected) {
     throw new EditError(
@@ -61,10 +70,15 @@ function applyOne(source: string, replacement: Replacement, where: string): stri
 
 export interface EditOutcome {
   readonly path: string;
+  /** Replacements applied. Every one is verified to have changed the text. */
   readonly applied: number;
-  /** Bytes before and after, so a caller can see the edit had an effect. */
-  readonly sizeBefore: number;
-  readonly sizeAfter: number;
+  /**
+   * UTF-16 code unit counts, not bytes, and not a completeness signal: a
+   * same-length substitution leaves them equal. Each replacement's effect is
+   * asserted individually; these are for reporting only.
+   */
+  readonly lengthBefore: number;
+  readonly lengthAfter: number;
 }
 
 /**
@@ -80,12 +94,16 @@ export function editFile(path: string, replacements: readonly Replacement[]): Ed
 
   let intended = before;
   replacements.forEach((replacement, index) => {
-    intended = applyOne(intended, replacement, `${path} replacement[${String(index)}]`);
+    const where = `${path} replacement[${String(index)}]`;
+    const next = applyOne(intended, replacement, where);
+    // Every replacement must change something on its own. Checking only the
+    // batch lets an ineffective replacement ride along beside an effective one
+    // and be reported as applied.
+    if (next === intended) {
+      throw new EditError(`${where}: matched, but changed nothing`);
+    }
+    intended = next;
   });
-
-  if (intended === before) {
-    throw new EditError(`${path}: replacements produced no change; the edit is a no-op`);
-  }
 
   writeFileSync(path, intended);
   verifyOnDisk(path, intended);
@@ -93,8 +111,8 @@ export function editFile(path: string, replacements: readonly Replacement[]): Ed
   return {
     path,
     applied: replacements.length,
-    sizeBefore: before.length,
-    sizeAfter: intended.length,
+    lengthBefore: before.length,
+    lengthAfter: intended.length,
   };
 }
 

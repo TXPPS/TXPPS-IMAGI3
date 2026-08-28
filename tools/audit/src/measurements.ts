@@ -1,6 +1,13 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Measurement } from './budgets/types.ts';
+import {
+  asRecord,
+  optionalNumber,
+  optionalString,
+  requireNonEmptyString,
+  requireNumber,
+} from './validate.ts';
 
 /** Directory where measuring harnesses drop their results for the budget gate. */
 export const MEASUREMENT_DIR = '.audit-out/measurements';
@@ -15,27 +22,15 @@ export class MeasurementError extends Error {
 }
 
 function parseMeasurement(raw: unknown, where: string): Measurement {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new MeasurementError(`${where} must be an object`);
-  }
-  const record = raw as Record<string, unknown>;
-  const id = record['id'];
-  const value = record['value'];
-  const origin = record['origin'];
-  const recordedAt = record['recordedAt'];
-  if (typeof id !== 'string' || id.length === 0) {
-    throw new MeasurementError(`${where}.id must be a non-empty string`);
-  }
-  if (typeof value !== 'number') {
-    throw new MeasurementError(`${where}.value must be a number`);
-  }
-  if (origin !== undefined && typeof origin !== 'string') {
-    throw new MeasurementError(`${where}.origin must be a string when present`);
-  }
-  if (recordedAt !== undefined && typeof recordedAt !== 'string') {
-    throw new MeasurementError(`${where}.recordedAt must be a string when present`);
-  }
-  return { id, value, origin, recordedAt };
+  const fail = (message: string): Error => new MeasurementError(message);
+  const record = asRecord(raw, where, fail);
+  return {
+    id: requireNonEmptyString(record, 'id', where, fail),
+    value: requireNumber(record, 'value', where, fail),
+    origin: optionalString(record, 'origin', where, fail),
+    recordedAt: optionalString(record, 'recordedAt', where, fail),
+    throttleRatio: optionalNumber(record, 'throttleRatio', where, fail),
+  };
 }
 
 /** Parse a measurement array that a harness produced. */

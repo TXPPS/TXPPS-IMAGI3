@@ -51,6 +51,27 @@ const EXPECTED_STATUS: Readonly<Record<DeviceProfileId, BudgetStatus>> = {
   phone: 'violated',
 };
 
+/**
+ * The workload is computed from this host's measured speed, not fixed.
+ *
+ * A fixed iteration count is not portable. Sized on one machine it left about
+ * 1.3x headroom under the unthrottled ceiling, so a runner a third slower would
+ * flip the leg that is supposed to pass, and the proof would fail for a reason
+ * unrelated to what it tests.
+ *
+ * The valid window is bounded below by the throttled ceiling divided by the
+ * throttling rate — under that, the throttled legs stop breaching — and above
+ * by the unthrottled ceiling. The target is the geometric middle, which leaves
+ * equal proportional headroom on both sides.
+ */
+const UNTHROTTLED_CEILING_MS = 3000;
+const THROTTLED_CEILING_MS = 6000;
+const NOMINAL_TABLET_RATE = 4;
+
+function targetWorkloadMs(): number {
+  return Math.sqrt((THROTTLED_CEILING_MS / NOMINAL_TABLET_RATE) * UNTHROTTLED_CEILING_MS);
+}
+
 async function loadWith(page: Page, query: string): Promise<void> {
   await page.goto(`${DEV_BASE_URL}/${query}`);
   await expect(page.locator(`html[${READY_ATTRIBUTE}="true"]`)).toBeAttached({
@@ -73,31 +94,38 @@ test.describe('planted CPU regression', () => {
     page,
     profile,
     incidents,
+    throttle,
   }) => {
-    await loadWith(page, '?plant=cpu-regression');
+    const iterations = Math.round(targetWorkloadMs() / throttle.msPerIteration);
+    await loadWith(page, `?plant=cpu-regression&iterations=${String(iterations)}`);
     const elapsedMs = await readReadyMs(page);
 
     const budgetId = COLD_LOAD_BUDGET_IDS[profile.id];
-    const report = checkBudgets(loadBudgets(), [{ id: budgetId, value: elapsedMs }]);
+    const report = checkBudgets(loadBudgets(), [
+      { id: budgetId, value: elapsedMs, throttleRatio: throttle.observedRatio },
+    ]);
     const status = report.results.find((r) => r.rule.id === budgetId)?.status;
 
     expect(
       status,
-      `${profile.label} (CPU rate ${String(profile.cpuThrottlingRate)}x) loaded in ` +
-        `${(elapsedMs / 1000).toFixed(2)}s against ${budgetId}`,
+      `${profile.label} (CPU rate ${String(profile.cpuThrottlingRate)}x, measured ` +
+        `${throttle.observedRatio.toFixed(2)}x) loaded in ${(elapsedMs / 1000).toFixed(2)}s ` +
+        `against ${budgetId}, workload ${String(iterations)} iterations sized for ` +
+        `${targetWorkloadMs().toFixed(0)}ms unthrottled on this host`,
     ).toBe(EXPECTED_STATUS[profile.id]);
 
     // The regression is purely temporal, so no other detector should see it.
     expect(incidents, 'a CPU regression must not raise console incidents').toEqual([]);
   });
 
-  test('is invisible to the screenshot comparator', async ({ page, profile }) => {
+  test('is invisible to the screenshot comparator', async ({ page, profile, throttle }) => {
+    const iterations = Math.round(targetWorkloadMs() / throttle.msPerIteration);
     const path = baselinePath(mkdtempSync(join(tmpdir(), 'imagi3-perf-')), profile, 'clean');
 
     await loadWith(page, '');
     compareToBaseline(await captureScreenshot(page), path, { allowCreate: true });
 
-    await loadWith(page, '?plant=cpu-regression');
+    await loadWith(page, `?plant=cpu-regression&iterations=${String(iterations)}`);
     const outcome = compareToBaseline(await captureScreenshot(page), path);
 
     expect(outcome.status).toBe('compared');

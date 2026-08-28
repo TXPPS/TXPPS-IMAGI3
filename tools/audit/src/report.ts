@@ -4,6 +4,7 @@ const STATUS_MARK: Readonly<Record<BudgetStatus, string>> = {
   passed: 'PASS',
   violated: 'FAIL',
   unmeasured: 'MISS',
+  unthrottled: 'THROT',
   deferred: 'defer',
 };
 
@@ -56,6 +57,7 @@ function summarise(report: BudgetReport): string {
     `${String(counts.passed)} passed`,
     `${String(counts.violated)} violated`,
     `${String(counts.unmeasured)} unmeasured`,
+    `${String(counts.unthrottled)} unthrottled`,
     `${String(counts.deferred)} deferred`,
   ];
   return `${report.ok ? 'BUDGETS OK' : 'BUDGETS FAILED'}: ${parts.join(', ')}`;

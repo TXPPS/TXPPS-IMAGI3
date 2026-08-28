@@ -36,9 +36,24 @@ export interface Measurement {
   readonly origin?: string | undefined;
   /** ISO timestamp stamped when the value was written to disk. */
   readonly recordedAt?: string | undefined;
+  /**
+   * CPU slowdown measured on the page that produced this value.
+   *
+   * Required for any budget scoped to a throttled device profile. A
+   * device-named budget measured on an unthrottled page carries no device
+   * signal, and the absence of this field is what makes that detectable from
+   * the artifact rather than from trusting the harness that wrote it.
+   */
+  readonly throttleRatio?: number | undefined;
 }
 
-export const BUDGET_STATUSES = ['passed', 'violated', 'unmeasured', 'deferred'] as const;
+export const BUDGET_STATUSES = [
+  'passed',
+  'violated',
+  'unmeasured',
+  'unthrottled',
+  'deferred',
+] as const;
 
 export type BudgetStatus = (typeof BUDGET_STATUSES)[number];
 

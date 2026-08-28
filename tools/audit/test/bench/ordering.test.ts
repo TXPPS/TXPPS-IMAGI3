@@ -97,12 +97,21 @@ describe('checkProfileOrdering', () => {
     expect(report.ok).toBe(true);
   });
 
-  it('keeps the required ratios well below the calibrated values and well above 1', () => {
-    // Calibration measured 4.32x-4.82x for tablet and 1.40x-1.51x for phone.
-    expect(MINIMUM_RATIOS.tabletOverDesktop).toBeGreaterThan(1);
+  /**
+   * The margin above 1.0 IS the property. Asserting only `> 1` leaves the
+   * floors as a one-word off switch: at 1.01, a tablet at 102ms against a
+   * desktop at 100ms passes, and an unthrottled run never reports exactly
+   * 1.00x — P0's own evidence was the phone measuring *faster* than desktop.
+   */
+  it('keeps the required ratios far enough above 1 to survive an unthrottled run', () => {
+    expect(MINIMUM_RATIOS.tabletOverDesktop).toBeGreaterThanOrEqual(1.5);
+    expect(MINIMUM_RATIOS.phoneOverTablet).toBeGreaterThanOrEqual(1.1);
+  });
+
+  it('keeps the required ratios below the calibrated values, so honest runs pass', () => {
+    // Calibration measured 4.32x-4.82x for tablet and 1.38x-1.51x for phone.
     expect(MINIMUM_RATIOS.tabletOverDesktop).toBeLessThan(4.3);
-    expect(MINIMUM_RATIOS.phoneOverTablet).toBeGreaterThan(1);
-    expect(MINIMUM_RATIOS.phoneOverTablet).toBeLessThan(1.4);
+    expect(MINIMUM_RATIOS.phoneOverTablet).toBeLessThan(1.38);
   });
 });
 
