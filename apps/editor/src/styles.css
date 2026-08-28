@@ -1,0 +1,77 @@
+:root {
+  --i3-bg: #0b0d12;
+  --i3-surface: #141824;
+  --i3-text: #e6e9f0;
+  --i3-muted: #8b93a7;
+  --i3-accent: #5b8cff;
+  --i3-safe-top: env(safe-area-inset-top, 0px);
+  --i3-safe-right: env(safe-area-inset-right, 0px);
+  --i3-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --i3-safe-left: env(safe-area-inset-left, 0px);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--i3-bg);
+  color: var(--i3-text);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: var(--i3-safe-top) var(--i3-safe-right) var(--i3-safe-bottom) var(--i3-safe-left);
+}
+
+.i3-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
+
+.i3-shell__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.i3-shell__subtitle {
+  margin: 0;
+  color: var(--i3-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.i3-shell__status {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--i3-accent) 40%, transparent);
+  border-radius: 999px;
+  background: var(--i3-surface);
+  color: var(--i3-accent);
+  font-size: 13px;
+}

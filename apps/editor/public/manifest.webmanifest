@@ -1,0 +1,12 @@
+{
+  "name": "IMAGI3",
+  "short_name": "IMAGI3",
+  "description": "Cross-device game engine: imagine, imagination, image.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
+  "icons": []
+}
