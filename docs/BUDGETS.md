@@ -118,6 +118,14 @@ That check is the mutation test for the throttling itself. With throttling
 removed, every ratio collapses to exactly 1.00x and the check exits non-zero.
 This was verified by doing it.
 
+**Cross-host evidence.** The thresholds were derived on the development host,
+so the open question was whether they survive different hardware. GitHub
+Actions run 33198049464 passed the profile-ordering step on its own runners,
+inside the pinned Playwright container — different CPU, different scheduler,
+different contention. That is one data point, not a guarantee, and a runner
+class slow enough to compress the ratios would surface as a failure here rather
+than as a silently weakened gate, which is the correct direction to fail in.
+
 ## Budgets that carry no device signal
 
 One budget still runs unthrottled: the desktop profile. On a CI runner it
