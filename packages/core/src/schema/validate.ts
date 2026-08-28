@@ -137,7 +137,7 @@ function validateEntity(raw: unknown, id: EntityId, path: string): Entity {
   const order = requireString(record, 'order', path);
   // Sortable, not canonical. A key ending in the smallest digit orders fine and
   // is repaired at load; rejecting it here would refuse a document over a fault
-  // that costs nothing to correct. See `graph.ts` and ADR-0013.
+  // that costs nothing to correct. See `graph.ts` and ADR-0014.
   if (!isSortableIndexKey(order)) fail(`"${order}" is not a valid ordering key`, `${path}.order`);
 
   const componentsRaw = asRecord(record['components'], `${path}.components`);
@@ -173,7 +173,7 @@ function validateEntity(raw: unknown, id: EntityId, path: string): Entity {
  * with their keys, values that can survive a round trip. What it guarantees is
  * that a document can be read, not that it describes a tree. Use
  * `loadSceneDocument` for that guarantee — validation alone does not give it.
- * See `graph.ts` and ADR-0013.
+ * See `graph.ts` and ADR-0014.
  *
  * @throws {SchemaError} naming the path of the first fault found.
  */

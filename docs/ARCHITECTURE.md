@@ -75,6 +75,48 @@ from planted defects. Detectors:
 Playwright project matrix, the budget `scope` field and the screenshot baseline
 directory layout all derive from it, so they cannot drift apart.
 
+## Where guards live
+
+> **A guard must not be deletable by the edit that introduces the defect it
+> catches. Guards live at artifact level, checked by a different module,
+> preferably in a different process, from the code under test.**
+
+This is a rule about placement, not about thoroughness, and it is the one thing
+this project has learned the hard way more than once.
+
+RC-0006 is the case that produced it. CPU throttling was applied to Playwright's
+fixture page and verified on that same page, by the same call. The cold-load
+spec measured pages it opened itself, which inherited nothing, so every
+device-named budget ran at full desktop speed for an entire gate — while the
+self-test that existed to catch exactly this stayed green, because it ran on a
+different page. The first fix was to apply and verify throttling inside the
+helper that opened those pages. That fix did not survive mutation: the edit
+removing the throttling removed its verification too, because both lived in the
+same function.
+
+What worked was moving the check to the artifact. The measurement now carries
+raw timing samples and the budget gate re-derives the slowdown from them, in
+another package, in another process. Delete the throttling anywhere in the
+harness and the samples show a ratio of 1.0 whatever anyone believed, and the
+gate rejects the budget.
+
+Three corollaries that follow from the rule and are worth stating separately,
+because each has been violated here at least once:
+
+- **A producer may not attest its own work.** A harness reports observations,
+  never conclusions. `throttle.ts` exists because a self-reported
+  `throttleRatio` was exactly the provenance the rule forbids.
+- **An opt-in guard is absent wherever nobody opted in.** Playwright
+  instantiates a fixture only for tests that destructure it, so the console
+  guard silently did not run for nine of thirteen specs. It is `auto` now, with
+  an expected-to-fail test that would pass — and so fail the run — if it stopped
+  being.
+- **A guard is not established until a mutation kills it.** A detector that has
+  only ever seen clean input has never been shown to detect anything.
+
+The audit table in `docs/GATES.md` applies the rule to every guard in the tree,
+and records which mutation killed each one.
+
 ## Constraints that shape everything downstream
 
 These come from the brief and are not negotiable by later phases:

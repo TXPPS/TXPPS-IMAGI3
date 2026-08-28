@@ -100,16 +100,33 @@ export const test = base.extend<AuditFixtures>({
     for (const fresh of opened) await fresh.close();
   },
 
-  incidents: async ({ page, allowIncidents }, use) => {
-    const incidents = await installIncidentCapture(page);
-    await use(incidents);
-    if (allowIncidents) return;
-    const report = judgeIncidents(incidents);
-    expect(
-      report.ok,
-      `page emitted unallowlisted failure signals:\n${describeViolations(report)}`,
-    ).toBe(true);
-  },
+  /**
+   * Automatic, not opt-in.
+   *
+   * Playwright instantiates a fixture only for tests that destructure it, so
+   * for as long as this was an ordinary fixture the console guard silently did
+   * not run for any test that did not ask for it — nine of the thirteen specs
+   * in this suite. The guard was not weak; for most of the suite it was absent,
+   * and nothing said so. Found by the guard audit in docs/GATES.md.
+   *
+   * `auto` makes it run everywhere and makes opting out explicit, via
+   * `allowIncidents`, which only the planted-fault proof sets. The proof that
+   * it is still automatic is a test in that spec which does not destructure
+   * this fixture and is expected to fail.
+   */
+  incidents: [
+    async ({ page, allowIncidents }, use) => {
+      const incidents = await installIncidentCapture(page);
+      await use(incidents);
+      if (allowIncidents) return;
+      const report = judgeIncidents(incidents);
+      expect(
+        report.ok,
+        `page emitted unallowlisted failure signals:\n${describeViolations(report)}`,
+      ).toBe(true);
+    },
+    { auto: true },
+  ],
 });
 
 export { expect };

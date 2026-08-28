@@ -5,6 +5,54 @@ pre-release, so versions are phase milestones rather than semantic versions.
 
 ## [Unreleased]
 
+### Phase 1 — Core (in progress)
+
+**Added**
+
+- `packages/core`: scene schema v1, shaped for CRDT merge from the start —
+  opaque generated ids, parent pointer plus fractional ordering key, component
+  maps keyed by id, and no derived data anywhere in the document (ADR-0012).
+- Canonical serializer, byte-stable across runs and processes, emitting sorted
+  keys directly rather than through a rebuilt object.
+- Migration registry with an identity migration that runs on every load, so the
+  machinery is exercised continuously rather than first used under pressure.
+- **Deterministic graph repair at load** (ADR-0014). Cycles, dangling parents
+  and non-canonical ordering keys are legitimate outcomes of concurrent edits,
+  so they are repaired rather than rejected: each cycle breaks at its lowest
+  entity id, re-parented to the root with a key derived from that id. Property
+  tested for idempotence, permutation-independence and convergence between
+  peers that received the document differently ordered.
+- Fuzz suite over the load boundary: every input either loads to a well-formed
+  tree or is rejected with a typed error naming the path. Found that malformed
+  JSON escaped as an untyped `SyntaxError`.
+
+**Changed**
+
+- The schema boundary validates shape only. Reference integrity moved to the
+  repair, because rejecting a merged document loses a peer's work.
+
+### Phase 1-PRE — Gate verifiability
+
+**Added**
+
+- Calibrated CDP CPU throttling per device profile, with a profile-ordering
+  self-test that fails if the ordering inverts.
+- Split gate registers: CI-VERIFIED and DEVICE-VERIFIED (DEFERRED). A deferred
+  gate never closes a phase.
+- Reviewer isolation via detached worktrees at a recorded SHA.
+- **Claims ledger.** A documented code change must name the commit that made
+  it; CI asserts the commit touches the path. Shell-based source edits are
+  banned by a lint check, since they cannot report having changed nothing.
+- **Guard audit** (docs/GATES.md) against a written rule: a guard must not be
+  deletable by the edit that introduces the defect it catches.
+
+**Changed**
+
+- Throttling evidence is raw paired samples plus probe metadata; the budget
+  gate derives the slowdown itself. A harness no longer reports a conclusion.
+- The console incident guard is an automatic fixture. It was opt-in, and so
+  absent from nine of thirteen E2E specs (RC-0007).
+
 ### Phase 0 — Foundation
 
 **Added**

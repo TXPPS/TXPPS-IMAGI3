@@ -472,3 +472,96 @@ is unachievable on top of it); per-component rather than per-field LWW (two
 people adjusting different properties of the same object is the single most
 common concurrent edit in a scene editor); a sequence CRDT for all arrays in v1
 (unbounded scope for a case P1 has no feature to exercise).
+
+---
+
+## ADR-0014 — Graph faults are repaired at load, not rejected at the boundary
+
+**Status:** accepted, P1. **Supersedes** the parent-reference checks that
+`validateSceneDocument` performed at v1.
+
+### Decision
+
+The schema boundary validates **shape**. Reference integrity — dangling parents,
+parent cycles, self-parenting, ordering keys that sort but are not canonical —
+is **repaired deterministically at load** by `repairSceneGraph`, which never
+throws and never drops an entity. `loadSceneDocument` is the composition of the
+two, and is the only supported way a document enters the engine.
+
+The repair rule, stated once so it can be checked rather than inferred:
+
+- Each **cycle** is broken at its **lowest entity id**, which is re-parented to
+  the root with an ordering key derived by hashing that id.
+- A **dangling parent** is re-parented to the root the same way.
+- A **non-canonical ordering key** — one ending in the smallest digit — is
+  rewritten by the same derivation.
+- Every repair emits a typed, non-fatal diagnostic naming what changed.
+
+### Why repair rather than reject
+
+Each of these is what two peers making valid concurrent edits produce between
+them. Peer A parents X under Y; peer B parents Y under X; neither did anything
+wrong and the merge is a cycle. Peer A deletes Y while peer B parents X under
+it; the merge has a dangling pointer. **Rejecting the document turns an ordinary
+concurrent edit into data loss**, which is a far worse outcome than a repaired
+tree plus a diagnostic. A rejected scene is a scene the user cannot open.
+
+Self-parenting is the same class, one member short, and was previously rejected
+while a two-element cycle was not — a boundary inconsistent with itself.
+
+### Why "lowest id", and why it is the load-bearing part
+
+The repair must be a **pure function of document state**. Every peer must reach
+the same document from the same merged input; anything else is a divergence in
+which both sides believe they are correct and nothing reports an error. That
+rules out insertion order, iteration order, traversal start point, wall clock,
+a counter, and which peer noticed first.
+
+The lowest id is the only tie-break available that depends on nothing but the
+cycle's own membership. It has no other virtue — it is not more likely to be the
+"right" entity to detach — and none is needed.
+
+The derived ordering key follows from the same requirement. A key from
+`keyBetween` would depend on what else is in the document at the moment of
+repair, which differs between peers mid-merge. Hashing the id depends on the id
+alone. Collisions are harmless: siblings sort by `(order, id)`, so two entities
+on the same key still have a total order, and it is the same order everywhere.
+
+### Why the stages run in that order
+
+Ordering keys, then dangling parents, then cycles. Breaking a cycle removes an
+edge; re-parenting a dangling child removes an edge. Neither can create work for
+an earlier stage, which is what makes one pass sufficient and the whole function
+idempotent.
+
+### How it is held to this
+
+Properties over generated damaged documents, not chosen examples — the
+fractional index bug that shipped was invisible to inspection and took two
+hundred random insertions to surface:
+
+- **Idempotent** — `repair(repair(d))` is byte-identical to `repair(d)`.
+- **Order-independent** — twenty shuffled rebuilds of the same document produce
+  identical canonical bytes.
+- **Convergent** — two peers given the document through different update
+  orderings land on identical bytes. This is the one that matters; the others
+  are the conditions that make it hold.
+- **Total** — multiple disjoint cycles, a cycle with subtrees hanging off it,
+  self-parents and a cycle that swallowed a root-level entity, all in one pass.
+
+### Consequences to be honest about
+
+`validateSceneDocument` alone no longer guarantees a tree. Anything holding a
+validated-but-unrepaired document can still meet a cycle, which is why
+`ancestorsOf` throws rather than truncating its walk — a silent truncation would
+hide exactly the fault the repair exists to remove. Callers use
+`loadSceneDocument`; the two-stage form exists for tests that need to observe
+the boundary and the repair separately.
+
+**Rejected:** rejecting cyclic documents (data loss on an ordinary merge);
+repairing by detaching the entity that closed the cycle (depends on update
+order, so peers diverge); repairing to the _deepest_ or _most recently touched_
+member (both need information the document does not carry, and the second would
+put a timestamp in the schema, which ADR-0012 forbids); leaving the document
+cyclic and making every traversal defensive (moves the cost to every reader and
+guarantees one of them forgets).

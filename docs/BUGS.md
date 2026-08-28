@@ -228,3 +228,77 @@ the same 2.0x — because those are independently produced timings rather than a
 self-reported field. It is not a gate today because cold load on a near-empty
 shell is dominated by fixed overhead that throttling does not touch, so the
 ratio would measure the harness rather than the app.
+
+---
+
+## RC-0007 — The console guard was opt-in, and absent from nine of thirteen specs
+
+**Found by:** the guard audit mandated in this session, not by a failure.
+**Severity:** high. **Status:** fixed.
+
+Playwright instantiates a fixture only for tests that destructure it. The
+`incidents` fixture — which captures console errors, uncaught exceptions and
+unhandled rejections, and asserts at teardown that none escaped the allowlist —
+was an ordinary fixture. Four specs asked for it. Nine did not, and for those
+nine the guard did not exist.
+
+Nothing reported this. The four that asked for it passed, the suite was green,
+and the fixture's own documentation said it ran everywhere. The layout tests,
+the manifest test, every visual test and the cold-load measurement could all
+have been throwing exceptions into the console for the whole of P0 and P1-PRE
+without a single red run.
+
+**Why the audit found it and testing did not.** Every test of this guard tested
+it on a page that had requested it. The question the audit asks is different:
+not "does the check fire when the thing breaks" but "is the check present at
+all in the paths that matter". A guard cannot be shown to work by exercising
+only the places it runs.
+
+**Fix:** the fixture is `auto`, so it runs for every test in the suite and
+opting out is explicit and rare — only the planted-fault proof does it, and
+only to assert the guard's verdict directly instead.
+
+**The mutation is permanent, not a one-off run.** An expected-to-fail test in
+`planted-fault.spec.ts` plants a console error _without_ destructuring the
+fixture. Today it fails, which is the guard firing on a spec that never asked.
+Remove `auto` and it asserts nothing, passes, and Playwright fails the run for a
+test that was expected to fail and did not. Verified in both directions.
+
+**Wider lesson, and it is a corollary of RC-0006 rather than a new one:** an
+opt-in guard is absent wherever nobody opted in, and its absence is invisible
+precisely where it matters. Anything that must hold for every test belongs in
+the harness's automatic path, with opting out visible in the test that does it.
+
+---
+
+## RC-0008 — `addEntity` is quadratic, and the editor is its only caller
+
+**Found by:** a 10,000-entity round-trip test taking over half a minute.
+**Severity:** medium now, **blocking at P3**. **Status:** open, mitigated.
+
+Each `addEntity` call copies the entity map and rescans the sibling list to
+place a new ordering key, so building n entities one at a time is O(n²). Ten
+thousand took over 36 seconds.
+
+`sceneFrom` was added for bulk assembly and the test suite now uses it, which is
+what made this stop being an immediate problem. **That mitigation does not
+reach the editor.** The editor applies one user action at a time and therefore
+uses the incremental path by construction — paste a subtree, import a tilemap,
+duplicate a selection, and it is `addEntity` in a loop on a document that may
+already hold ten thousand entities. Documenting an O(n²) API does not make it
+shippable; it makes it a known defect with a comment attached.
+
+**Why it is not fixed now.** The right fix depends on a decision P3 has not
+taken: whether the editor holds a mutable working document with an index and
+serialises on save, or stays fully immutable and gains a persistent map. The
+first is simpler and faster; the second composes with the undo stack and the
+sync layer without a second representation. Choosing now, before either the undo
+stack or Yjs exists, would be choosing on a guess.
+
+**P3 gate condition, which this entry blocks:** a bulk editor operation on a
+10,000-entity scene — paste of a 500-entity subtree is the reference case —
+stays within `editor.frameSpike.max` under the throttled tablet profile. The
+budget already exists and is enforced from P3; what is missing is a harness that
+drives the operation. That harness is part of closing this entry, not a separate
+task, because a performance claim with no measurement behind it is what this
+project has repeatedly had to unlearn.

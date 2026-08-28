@@ -82,6 +82,31 @@ test.describe('planted faults', () => {
     expect(control.results.find((r) => r.rule.id === budgetId)?.status).toBe('passed');
   });
 
+  /**
+   * The console guard must not be opt-in.
+   *
+   * Playwright instantiates a fixture only for a test that destructures it, so
+   * an ordinary `incidents` fixture runs only where someone remembered to ask
+   * for it — which for most of this suite was nowhere, invisibly. This test
+   * deliberately does not destructure it, plants a console error, and expects
+   * to fail: the failure is the guard firing automatically.
+   *
+   * If `incidents` ever stops being an automatic fixture, nothing here asserts
+   * anything, the test passes, and Playwright fails the run for a test that was
+   * expected to fail and did not. That is the mutation, wired up permanently
+   * rather than run once by hand.
+   */
+  test.describe('automatic console guard', () => {
+    test.use({ allowIncidents: false });
+
+    test.fail();
+    test('fires without the spec asking for it', async ({ page }) => {
+      await page.goto(`${DEV_BASE_URL}/?plant=console-error`);
+      await expect(page.locator(`html[${READY_ATTRIBUTE}="true"]`)).toBeAttached();
+      // No assertion of our own. The fixture's teardown is the assertion.
+    });
+  });
+
   test('a clean page passes the same guards it just failed', async ({ page, incidents }) => {
     await page.goto(`${DEV_BASE_URL}/`);
     await expect(page.locator(`html[${READY_ATTRIBUTE}="true"]`)).toBeAttached();

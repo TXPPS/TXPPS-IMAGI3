@@ -1,0 +1,15 @@
+{
+  "name": "@imagi3/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@imagi3/core": "workspace:*"
+  }
+}

@@ -45,6 +45,91 @@ can, and it is what every report records.
 
 ---
 
+## Guard audit
+
+Every detector in the tree, against the rule in `docs/ARCHITECTURE.md`:
+
+> A guard must not be deletable by the edit that introduces the defect it
+> catches.
+
+Two questions per guard. **What single edit introduces the defect?** and **does
+that same edit remove or disable the guard?** A guard answering yes to the
+second is relocated or replaced — it is not a guard, it is a comment that runs.
+
+The P0 detectors were expected to fail this audit, having been written before
+the lesson. Two did.
+
+| Guard                         | Lives in                            | The defect it catches                                 | Same edit disables it?                                                                                                                    | Mutation                                                        |
+| ----------------------------- | ----------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Budget bounds                 | `budgets/check.ts`                  | A measurement outside its ceiling                     | No. The defect is slow code; the guard is a separate process reading an artifact                                                          | `detectors.test.ts`, planted 40% over ceiling (`2520574`)       |
+| Unmeasured is failure         | `budgets/check.ts`                  | A budget nobody measured reported as green            | No. Deleting the harness is what triggers it                                                                                              | `check.test.ts`; RC-0004 was found by it                        |
+| Orphan measurement ids        | `budgets/check.ts`                  | A harness writing a value no rule claims              | No                                                                                                                                        | `detectors.test.ts` (`2520574`)                                 |
+| **Throttling evidence**       | `budgets/throttle.ts` + `check.ts`  | A device-named budget measured on an unthrottled page | **No, now.** Was yes: see below                                                                                                           | `check.test.ts` — a plausible ratio with no samples (`0899ec7`) |
+| Throttle verification on page | `cpu-bench-page.ts`                 | CDP throttling not reaching a page                    | **Yes**, and knowingly. Removing the throttling removes its verification; this is a fail-fast convenience, and the guard is the row above | Held by the artifact check, not by this                         |
+| Profile ordering              | `bench/ordering.ts`                 | Throttling absent from the whole run                  | No. Separate CLI over artifacts; ratios collapse to 1.0 and it fails                                                                      | Verified by disabling throttling (`89a2f6e`)                    |
+| Profile rate mismatch         | `bench/ordering.ts`                 | A stale benchmark artifact                            | No, with a stated limit: the harness writes the rate from the profile, so it cannot detect a live mismatch                                | `ordering.test.ts`                                              |
+| **Console incidents**         | `tests/e2e/fixtures.ts`             | Console errors, throws, unhandled rejections          | **No, now.** Was yes: see below                                                                                                           | `planted-fault.spec.ts`, permanent expected-failure test        |
+| Console allowlist judgement   | `console/allowlist.ts`              | An unallowlisted signal treated as benign             | No. Pure function, tested against planted entries                                                                                         | `detectors.test.ts` (`2520574`)                                 |
+| Pixel delta gate              | `image/pixel-diff.ts`               | A visible rendering change                            | No. Comparator is in the audit package; the defect is in app code                                                                         | 21 planted regressions; each gate isolated (`2520574`)          |
+| Mean SSIM gate                | `image/ssim.ts`                     | A structural rendering change                         | No                                                                                                                                        | As above; RC-0003 records what it missed alone                  |
+| Damaged-window gate           | `image/compare.ts`                  | A small but total local change                        | No                                                                                                                                        | As above                                                        |
+| Absent baseline is failure    | `image/io.ts`                       | A first run inventing its own baseline                | No                                                                                                                                        | `visual.spec.ts` (`b2ed521`)                                    |
+| Bundle size                   | `bundle/measure.ts` + budget gate   | Bundle growth past its ceiling                        | No. Measured by a CLI, judged by the gate                                                                                                 | `detectors.test.ts` on real bytes (`2520574`)                   |
+| No dev faults in production   | `apps/editor/test/no-dev-faults.ts` | Debug scaffolding shipped to users                    | No. Guard builds its own bundle; paired with a presence check so a broken build cannot pass                                               | RC-0002 records the version that could not fail                 |
+| Budget naming honesty         | `budgets/ids.ts`                    | A budget named for an unthrottled profile             | No. Pure over an id list, tested against planted ids                                                                                      | `real-config.test.ts`                                           |
+| Phase agreement               | `real-config.test.ts`               | `budgets.json` and `STATE.md` disagreeing             | No. Reads both files                                                                                                                      | `real-config.test.ts`                                           |
+| Stray declarations            | `stray-declarations.ts`             | Generated `.d.ts` committed beside source             | No. The defect is a tsconfig change; the guard is a test that walks the tree                                                              | `no-stray-declarations.test.ts`                                 |
+| Schema boundary               | `schema/validate.ts`                | An unreadable document loading half-way               | No. The defect is in the document                                                                                                         | `fuzz.test.ts`, 300+ mutants                                    |
+| Graph repair convergence      | `graph.ts`                          | Peers diverging on the same merge                     | No. Properties are asserted over generated input, not over the implementation                                                             | Permutation and convergence properties (`0899ec7`)              |
+| Claims ledger                 | `claims.ts` + CI                    | A documented fix that never landed                    | No. Writing a false claim in a document does not touch the checker                                                                        | Planted false claim, exit 1 (below)                             |
+| Shell-edit ban                | `no-shell-edits.ts`                 | An unverified `sed -i` returning to the tree          | No. Adding one to a workflow does not touch the test                                                                                      | 10 planted forms, 7 legal forms                                 |
+| Simulation determinism        | `runtime/test/determinism.test.ts`  | A simulation reading something outside its inputs     | No. Hashes the canonical serialisation of state, not the objects, so a change to the systems cannot also change what counts as identical  | Iteration order unsorted — kills that test and only that one    |
+| System order                  | `simulation.ts` `SYSTEM_ORDER`      | A silent reordering changing behaviour                | No. The order is data and a test asserts the list                                                                                         | Any reorder fails the assertion                                 |
+
+### The two that failed, and what was done
+
+**Throttling evidence** (P1-PRE). The measurement carried a `throttleRatio`
+scalar written by the harness that produced it — a producer attesting its own
+work, which is the rule's first corollary. A harness that stopped throttling but
+kept reporting `4.7` would have passed, and nothing in the artifact could have
+contradicted it. Replaced with raw paired samples plus probe metadata, from
+which the gate derives the ratio itself: `file:tools/audit/src/budgets/throttle.ts @ 0899ec7`.
+The mutation is a probe carrying a plausible ratio and no samples, which the
+gate now rejects — because there is no longer a ratio field for it to carry.
+
+**Console incidents** (P0). Playwright instantiates a fixture only for tests
+that destructure it, so the console guard ran for four of thirteen specs and was
+absent from the other nine. Nothing reported this; the four that asked for it
+passed, and the suite looked green. The fixture is now `auto`, and the mutation
+is permanent rather than run once: an expected-to-fail test in
+`planted-fault.spec.ts` plants a console error without requesting the fixture,
+so if `auto` is ever removed that test passes and Playwright fails the run for
+an unexpected pass. Verified both ways — expected-failure with `auto: true`,
+unexpected pass with it off.
+
+### Claims ledger positive control
+
+A false claim must fail the build, and a true one must not. Both were run
+against the real history rather than a mock, each in a scratch file claiming
+`packages/core/src/canonical.ts`:
+
+```
+claimed against 8fce385  -> CLAIMS OK: 1 verified against the history   exit 0
+claimed against 1946f48  -> CLAIMS FAILED: 1 of 1 claim a change ...    exit 1
+```
+
+`8fce385` is the commit that added that file; `1946f48` is a documentation-only
+commit that does not touch it. The second is the shape of the failure that has
+happened three times here, and it now cannot be committed silently.
+
+The claim marker is deliberately **not** written out in that block. The parser
+has no notion of a code fence, so a documented example would be checked as a
+real claim — and teaching it to skip fenced blocks would hand anyone a way to
+park a false claim inside one. Living without an inline example of the syntax is
+the cheaper of the two costs.
+
+---
+
 ## P0 — Foundation
 
 **Status: CLOSED.** All three mandatory roles signed independently.

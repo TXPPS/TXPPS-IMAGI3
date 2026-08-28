@@ -272,3 +272,41 @@ as an unenforced claim.
 
 **To close:** implement the audit as part of the P5 tablet shell, running over
 every focusable and pointer-interactive element at both touch profiles.
+
+---
+
+## GAP-010 — Fractional key length under sustained CRDT interleaving
+
+**Status:** open by design until P4. **Blocks:** honest sign-off of the P4 gate.
+
+Ordering keys grow when insertions repeatedly split the same gap. The suite
+bounds the single-editor worst case — a hundred successive splits of one gap
+stays under 30 characters — but that is not the case that matters. The case
+that matters is two peers inserting into the same gap concurrently, over and
+over, across a long offline period, which is a pattern only Yjs makes possible
+and which nothing here can produce yet.
+
+Why it is not merely cosmetic. Key length enters the document three times: as
+bytes in every entity, as the comparison cost of every sibling sort, and as the
+per-key overhead in a Yjs map. Unbounded growth is a slow leak that shows up as
+a scene that opens more slowly every week, and which no single measurement
+catches because no single measurement is slow.
+
+**Measurement plan for P4**, to be run once `packages/sync` exists:
+
+1. Drive N peers (N = 2, 4, 8) through a scripted interleaving that concentrates
+   insertions on the same sibling gap: each peer inserts at the front of the
+   same list, offline, then merges.
+2. Record the distribution of key lengths after each merge round — maximum,
+   p99, mean — for 10, 100 and 1000 rounds.
+3. Assert a bound on **growth rate**, not on absolute length. Length must grow
+   no worse than logarithmically in the number of rounds; linear growth per
+   round is the failure this exists to catch.
+4. Record the numbers in `docs/BUDGETS.md` and promote the bound to an enforced
+   budget with `enforcedFrom: P4`.
+
+**Fallback if growth is worse than logarithmic:** rebalancing is a destructive
+operation under a CRDT — rewriting every sibling's key is a write to every
+sibling, which is the exact conflict pattern fractional indices exist to avoid.
+The remedy is therefore a _jitter_ on key generation rather than a rebalance,
+and that choice needs its own ADR before it is implemented.

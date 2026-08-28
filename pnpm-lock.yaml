@@ -53,6 +53,12 @@ importers:
 
   packages/core: {}
 
+  packages/runtime:
+    dependencies:
+      '@imagi3/core':
+        specifier: workspace:*
+        version: link:../core
+
   tools/audit:
     dependencies:
       pngjs:

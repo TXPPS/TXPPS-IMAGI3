@@ -68,14 +68,55 @@ Each of those choices exists to close a specific hole:
   than exposing it — samples of 20/20/3000 ms report 20 — which is the wrong
   direction for a gate whose job is catching regressions. A single sample is
   noise; a median is forgiving; the maximum is the conservative reduction.
-- **Throttling proven on each sampled page.** Every page is opened through a
-  fixture that applies the profile's CPU throttling and then measures it on
-  that page, and the observed ratio is recorded alongside the measurement. The
-  budget gate rejects a device-scoped measurement whose recorded ratio is
-  missing or near 1.0x. That is not belt-and-braces: CDP throttling is
-  per-page, and an earlier version of this harness throttled only the fixture
-  page while the spec measured pages it opened itself, so every device-named
-  budget was measured at full desktop speed. See RC-0006.
+- **Throttling proven on each sampled page, in raw samples.** Every page is
+  opened through a fixture that applies the profile's CPU throttling and then
+  probes it on that page. CDP throttling is per-page, and an earlier version of
+  this harness throttled only the fixture page while the spec measured pages it
+  opened itself, so every device-named budget was measured at full desktop
+  speed. See RC-0006.
+
+### How the slowdown is estimated, and by whom
+
+The harness reports **observations**; the budget gate computes the **estimate**.
+It has to be that way round — a self-reported ratio is the producer attesting
+its own work, and a harness that stopped throttling but kept writing `4.7` would
+have been undetectable.
+
+Each probe records the workload's identity, its iteration count, the value it
+folded to, and two arrays of raw durations:
+
+| Field                    | What it is                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| `benchmarkId`            | Which workload ran. A probe from another one is refused.                                  |
+| `iterations`, `checksum` | Recomputed by the gate, so a probe cannot claim a workload whose answer it does not know. |
+| `controlMs`              | Durations with throttling **off**, same page, same run.                                   |
+| `throttledMs`            | Durations with it **on**, paired index-for-index.                                         |
+
+**Three paired samples, fixed.** Control and throttled runs alternate, so
+contention lasting longer than one pair divides out rather than biasing the
+ratio. The count is fixed rather than a loop that resamples until the number is
+acceptable — sampling to a threshold is a way of manufacturing a passing result.
+
+**Median of the pairs within a probe, median across probes.** Two other
+reductions were considered and rejected. A minimum-over-minimum estimates each
+side's uncontended speed but means every extra sample can only lower the result,
+so one slow control draw is unrecoverable — it read 1.96x on a genuinely
+4x-throttled host. A maximum-over-minimum is not an estimate at all; it is the
+largest ratio the data can be made to yield, and review disproved the argument
+that every influence on this quantity depresses it (an unthrottled page measured
+1.31x, not the 1.0x that argument assumed).
+
+**Two checks a scalar could not support.** The gate recomputes the checksum, so
+a probe must know what the workload folds to; and it rejects a control faster
+than `1e-7` ms per iteration, two orders of magnitude below any real host —
+eighty million dependent multiplies in half a millisecond describes hardware
+that does not exist.
+
+**What this still cannot do**, stated so it is not mistaken for more: a harness
+that computes plausible timings without running anything will pass. Nothing in a
+file can attest itself. What changed is the failure that actually happened —
+throttling silently lost — which now shows a control and a throttled sample at
+the same speed and a derived ratio of 1.0, whatever anyone wrote down.
 
 ## CPU throttling, and how the rates were chosen
 

@@ -19,6 +19,14 @@ export default defineConfig({
       {
         test: {
           ...NODE_TEST_DEFAULTS,
+          name: 'runtime',
+          root: './packages/runtime',
+          include: ['test/**/*.test.ts'],
+        },
+      },
+      {
+        test: {
+          ...NODE_TEST_DEFAULTS,
           name: 'audit',
           root: './tools/audit',
           include: ['test/**/*.test.ts'],
