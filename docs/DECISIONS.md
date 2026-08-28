@@ -336,3 +336,139 @@ device claim); keeping the `editor.coldLoad.desktop` id because the brief names
 a desktop ceiling (the brief names a ceiling for real desktops, which is
 precisely what is not being measured); throttling by wall-clock delay injection
 (measures nothing about CPU speed).
+
+---
+
+## ADR-0012 — Scene schema v1, shaped for CRDT merge from the start
+
+**Status:** accepted (P1, design fixed before implementation)
+
+Schema v1 is a one-way door. Projects authored against it must keep opening,
+and P4 introduces Yjs to a document that will already be full of user data. A
+shape that merges badly cannot be fixed later without a migration that loses
+edits, so the CRDT constraints are applied now, while the cost is zero.
+
+### The document
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "id": "sc_<opaque>",
+  "name": "Main",
+  "entities": {
+    "en_<opaque>": {
+      "id": "en_<opaque>",
+      "name": "Player",
+      "parent": null, // or an entity id
+      "order": "a0", // fractional index among siblings
+      "components": {
+        "cm_<opaque>": { "id": "cm_<opaque>", "type": "transform", "data": {} },
+      },
+    },
+  },
+}
+```
+
+### Four rules, and what each one prevents
+
+**1. Identity is an opaque generated id, never a position.** Entities and
+components are addressed by id, and ids appear both as the map key and inside
+the value. Array index identity does not survive a merge: two peers inserting
+at index 3 do not mean the same thing, and after merge neither index 3 is what
+either peer meant. Ids are also opaque — no meaning is encoded in them — so
+nothing can come to depend on their content.
+
+**2. Hierarchy is a parent pointer plus an explicit ordering key.** No nested
+`children` array anywhere. A children array makes every reparent a
+read-modify-write of two arrays, which is exactly the operation CRDTs merge
+worst. A parent pointer makes reparenting a single-register write.
+
+Sibling order is a **fractional index**: a string chosen so that a new key can
+always be generated strictly between any two existing keys, without renumbering
+anything. Ordering is by `(order, id)`, not `order` alone — two peers can
+concurrently generate the same key, and the id breaks the tie deterministically
+so every peer sorts identically.
+
+**3. Components are a map keyed by component id, not an array or a type map.**
+Keyed by id, two peers concurrently adding a transform produce two transforms —
+a resolvable condition — rather than a lost write. The consequence is that
+duplicate component types are _representable_, so the runtime must define what
+they mean rather than assuming they cannot happen: component types declare
+whether they are unique per entity, and a violation resolves deterministically
+to the lowest component id, surfacing a typed diagnostic. It degrades; it does
+not crash. That is a requirement of the fuzz suite, not a nicety.
+
+**4. No derived or cached data inside the document. Ever.** No world
+transforms, no bounding boxes, no child lists, no dirty flags. Derived data is
+a second source of truth, and a merge that updates one and not the other
+produces a document that is internally inconsistent in a way no peer can
+detect. Everything derived is computed at load and lives outside the document.
+
+### Cycles are a merge outcome, not a bug to prevent
+
+Two peers can concurrently reparent A under B and B under A. Both edits are
+individually valid; the merge is not. Cycles therefore cannot be prevented at
+write time — they must be **repaired deterministically at load**, identically on
+every peer, or peers diverge.
+
+The rule: detect cycles, and for each one reparent the member with the lowest id
+to the root, emitting a typed diagnostic. Lowest id is arbitrary but total and
+stable, which is what matters. The alternative — rejecting the document — turns
+a routine concurrent edit into data loss.
+
+### Migration exists before it is needed
+
+`schemaVersion` is a required top-level field, and a migration registry ships in
+v1 containing an identity migration from v1 to v1, exercised by a test. A
+migration path added when the first breaking change arrives is a migration path
+written under pressure against documents that already exist.
+
+**Rejected:** nested `children` arrays (the standard scene-graph shape, and the
+worst possible one to merge); components keyed by type (loses a concurrent add
+instead of surfacing it); integer sibling indices (every insert renumbers, so
+every insert conflicts); positional identity (does not survive merge); storing
+world transforms (a second source of truth that merge desynchronises).
+
+---
+
+## ADR-0013 — What merges, and what is last-write-wins
+
+**Status:** accepted (P1, design fixed before implementation)
+
+The brief requires no last-write-wins dialogs. That is a promise about the user
+experience, and it can only be kept if every field's merge behaviour is decided
+in advance rather than discovered when two devices disagree.
+
+Nothing here is implemented in P1 — Yjs arrives in P4 — but the schema is built
+so that these mappings are the natural ones, and P1's serializer must not
+foreclose any of them.
+
+| Location                       | Behaviour                  | Why                                                                                                                                                                       |
+| ------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `entities` map                 | CRDT map: add/remove merge | Two peers adding entities must both keep them.                                                                                                                            |
+| `entity.parent`                | LWW register               | One value. Concurrent reparent is a genuine either/or; the loser is a moved node, not lost work. Cycles repaired per ADR-0012.                                            |
+| `entity.order`                 | LWW register               | Fractional index; ties broken by id, so concurrent writes still totally order.                                                                                            |
+| `entity.name`                  | LWW register               | Short, rarely concurrent. A text CRDT here buys nothing.                                                                                                                  |
+| `components` map               | CRDT map: add/remove merge | Concurrent component adds must both survive.                                                                                                                              |
+| `component.type`               | Immutable after creation   | Changing a component's type is deleting one and adding another. Enforced at the schema boundary.                                                                          |
+| `component.data` scalar fields | Per-field LWW register     | Two peers editing different fields of the same component must not clobber each other. Per-field, not per-component.                                                       |
+| `component.data` arrays        | **Opaque LWW value**       | v1 replaces arrays wholesale. Point lists and similar merge poorly as sequences, and getting that right is not P1 work. Recorded as a known limitation, not an oversight. |
+| Script source text             | Text CRDT (P7)             | The one place character-level merge genuinely matters.                                                                                                                    |
+| `asset-index.json`             | CRDT map, LWW per key      | Name to hash. Both peers' new assets survive; a name pointing at two hashes resolves LWW.                                                                                 |
+| Binary assets                  | Never merged               | Content-addressed and immutable. Two hashes are two files.                                                                                                                |
+
+### The consequence to be honest about
+
+Array fields are LWW in v1. Two people editing different vertices of the same
+polygon concurrently will lose one set of edits, silently. That is a real
+limitation with a real user cost, and it is chosen deliberately over shipping a
+sequence CRDT for geometry in P1. It must be revisited before any feature makes
+concurrent array editing routine — a tilemap layer, a spline tool, a particle
+curve — and it is recorded in docs/ARCHITECTURE.md where a feature author will
+meet it.
+
+**Rejected:** whole-document LWW (the "no last-write-wins dialogs" requirement
+is unachievable on top of it); per-component rather than per-field LWW (two
+people adjusting different properties of the same object is the single most
+common concurrent edit in a scene editor); a sequence CRDT for all arrays in v1
+(unbounded scope for a case P1 has no feature to exercise).

@@ -94,6 +94,47 @@ These come from the brief and are not negotiable by later phases:
   sandboxed iframe or Worker; a malformed script must not be able to kill the
   editor.
 
+## Scene document merge semantics
+
+**Read this before adding a field to the scene schema.** The scene document is
+edited on several devices at once and merged without asking the user to resolve
+anything. That is only possible if every field's merge behaviour was decided
+when the field was added.
+
+The full table is ADR-0013. The three rules that decide most cases:
+
+1. **Collections of things with identity are CRDT maps**, keyed by opaque
+   generated id. Entities and components. Concurrent additions all survive.
+2. **Single values are last-write-wins registers, per field.** Per field, not
+   per object: two people adjusting different properties of the same object is
+   the most common concurrent edit in a scene editor, and per-object LWW loses
+   one of them.
+3. **Arrays are replaced wholesale (LWW) in v1.** This is a real limitation
+   with a real cost — two people editing different vertices of the same polygon
+   concurrently will silently lose one set of edits. It is chosen deliberately
+   over shipping a sequence CRDT in P1, and it **must be revisited before any
+   feature makes concurrent array editing routine**: a tilemap layer, a spline
+   tool, a particle curve. If the feature you are adding is one of those, this
+   decision is now yours to reopen.
+
+Two structural rules follow from the same reasoning, and are not negotiable per
+field:
+
+- **No nested `children` arrays.** Hierarchy is a parent pointer plus a
+  fractional-index ordering key. A children array makes every reparent a
+  read-modify-write of two arrays, which is what merges worst.
+- **No derived or cached data in the document.** No world transforms, no
+  bounding boxes, no child lists, no dirty flags. Derived data is a second
+  source of truth, and a merge that updates one and not the other produces a
+  document no peer can detect is wrong. Compute it at load, keep it outside.
+
+One consequence worth knowing before it surprises you: because components are
+keyed by id rather than type, **duplicate component types are representable**.
+Two peers concurrently adding a transform produce two transforms. The runtime
+resolves this deterministically — lowest component id wins for unique types —
+and emits a typed diagnostic. It is a condition to handle, not an invariant to
+assume.
+
 ## Planned package layout
 
 Created as their phases arrive, so that no package exists before it has a job:

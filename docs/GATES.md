@@ -31,10 +31,17 @@ changed two seconds before a reviewer's end-to-end run finished, and the
 resulting artifact was described as frozen when it was not.
 
 ```
-git tag -a review/<phase>-<n> -m "..."          # implementer, before requesting review
-git worktree add --detach ../review-<role> review/<phase>-<n>
-cd ../review-<role> && pnpm install --frozen-lockfile
+git tag -a review/<phase>-<n> -m "..."      # implementer, before requesting review
+pnpm review:worktree <role> review/<phase>-<n>
 ```
+
+`pnpm review:worktree` creates the detached worktree and prints the SHA the
+report must record.
+
+**The SHA is the identifier, not the tag.** This environment's git proxy
+refuses tag pushes with HTTP 403, so review tags exist only locally. A tag that
+cannot leave the machine cannot identify a tree to anyone else; the commit SHA
+can, and it is what every report records.
 
 ---
 
