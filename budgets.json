@@ -7,6 +7,7 @@
       "unit": "ms",
       "scope": "desktop",
       "max": 3000,
+      "min": 1,
       "enforcedFrom": "P0",
       "source": "brief-4-performance"
     },
@@ -16,6 +17,7 @@
       "unit": "ms",
       "scope": "tablet",
       "max": 6000,
+      "min": 1,
       "enforcedFrom": "P0",
       "source": "brief-4-performance"
     },
@@ -25,6 +27,7 @@
       "unit": "ms",
       "scope": "phone",
       "max": 6000,
+      "min": 1,
       "enforcedFrom": "P0",
       "source": "adr-0006"
     },
@@ -33,7 +36,7 @@
       "description": "Engine runtime bundle, gzipped, excluding editor and user assets.",
       "unit": "bytes",
       "scope": "all",
-      "max": 1572864,
+      "max": 1500000,
       "enforcedFrom": "P1",
       "source": "brief-4-performance"
     },
@@ -69,7 +72,7 @@
       "description": "Peak JS heap during play mode, phone profile. Excludes GPU memory, which JS cannot observe.",
       "unit": "bytes",
       "scope": "phone",
-      "max": 524288000,
+      "max": 500000000,
       "enforcedFrom": "P6",
       "source": "brief-4-performance"
     },
@@ -78,7 +81,7 @@
       "description": "Texture and GPU buffer bytes resident, phone profile, accounted by the asset loader.",
       "unit": "bytes",
       "scope": "phone",
-      "max": 268435456,
+      "max": 256000000,
       "enforcedFrom": "P6",
       "source": "brief-4-performance"
     },
@@ -93,11 +96,12 @@
     },
     {
       "id": "editor.bundle.gzip",
-      "description": "Editor application bundle, gzipped, excluding the engine runtime chunk.",
+      "description": "Editor application bundle, gzipped: every emitted JS and CSS asset, excluding source maps and the engine runtime chunk.",
       "unit": "bytes",
       "scope": "all",
-      "max": 5242880,
-      "enforcedFrom": "P3",
+      "max": 5000000,
+      "min": 1,
+      "enforcedFrom": "P0",
       "source": "adr-0006"
     }
   ]

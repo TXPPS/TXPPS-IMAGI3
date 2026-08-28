@@ -8,21 +8,22 @@
     "node": ">=22.0.0"
   },
   "scripts": {
+    "audit:budgets": "node --experimental-strip-types tools/audit/src/cli/check-budgets.ts",
+    "audit:bundle": "node --experimental-strip-types tools/audit/src/cli/measure-bundle.ts",
+    "audit:clean": "rm -rf .audit-out",
+    "audit:selftest": "vitest run --project audit-selftest",
     "build": "pnpm -r --filter \"./packages/*\" --filter \"./tools/*\" run build && pnpm --filter @imagi3/editor run build",
-    "typecheck": "tsc -b --pretty false",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "clean": "git clean -xdf node_modules dist .turbo && echo cleaned",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "sweep": "pnpm audit:clean && pnpm verify && pnpm audit:bundle && pnpm test:e2e && pnpm audit:budgets",
     "test": "vitest run",
-    "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "audit:budgets": "node --experimental-strip-types tools/audit/src/cli/check-budgets.ts",
-    "audit:selftest": "vitest run --project audit-selftest",
-    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-    "clean": "git clean -xdf node_modules dist .turbo && echo cleaned",
-    "sweep": "pnpm verify && pnpm test:e2e && pnpm audit:budgets",
-    "audit:clean": "rm -rf .audit-out"
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --pretty false",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

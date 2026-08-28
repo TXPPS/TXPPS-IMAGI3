@@ -67,13 +67,6 @@ export const ALL_DEVICE_PROFILES: readonly DeviceProfile[] = DEVICE_PROFILE_IDS.
   (id) => DEVICE_PROFILES[id],
 );
 
-/**
- * Minimum interactive target size in CSS pixels, per WCAG 2.2 target size
- * (enhanced) and the Apple/Material touch guidance the tablet and phone shells
- * are audited against.
- */
-export const MIN_TOUCH_TARGET_PX = 44;
-
 export function isDeviceProfileId(value: string): value is DeviceProfileId {
   return (DEVICE_PROFILE_IDS as readonly string[]).includes(value);
 }

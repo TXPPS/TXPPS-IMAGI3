@@ -3,6 +3,8 @@ export * from './profiles.ts';
 export * from './budgets/types.ts';
 export * from './budgets/load.ts';
 export * from './budgets/check.ts';
+export * from './budgets/gate.ts';
+export * from './bundle/measure.ts';
 export * from './console/types.ts';
 export * from './console/allowlist.ts';
 export * from './image/types.ts';

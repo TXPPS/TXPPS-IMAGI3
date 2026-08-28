@@ -13,24 +13,24 @@ function formatValue(value: number, rule: BudgetRule): string {
   return `${String(value)}${rule.unit === 'ratio' ? '' : ` ${rule.unit}`}`;
 }
 
-function evaluateBounds(rule: BudgetRule, value: number): BudgetResult {
+function evaluateBounds(rule: BudgetRule, measurement: Measurement): BudgetResult {
+  const value = measurement.value;
+  const base = { rule, value, measurement } as const;
   if (rule.max !== undefined && value > rule.max) {
     return {
-      rule,
+      ...base,
       status: 'violated',
-      value,
       detail: `${formatValue(value, rule)} exceeds max ${formatValue(rule.max, rule)}`,
     };
   }
   if (rule.min !== undefined && value < rule.min) {
     return {
-      rule,
+      ...base,
       status: 'violated',
-      value,
       detail: `${formatValue(value, rule)} is below min ${formatValue(rule.min, rule)}`,
     };
   }
-  return { rule, status: 'passed', value, detail: `${formatValue(value, rule)} within budget` };
+  return { ...base, status: 'passed', detail: `${formatValue(value, rule)} within budget` };
 }
 
 function evaluateRule(
@@ -43,6 +43,7 @@ function evaluateRule(
       rule,
       status: 'deferred',
       value: undefined,
+      measurement: undefined,
       detail: `not enforced until ${rule.enforcedFrom} (current ${document.currentPhase})`,
     };
   }
@@ -53,6 +54,7 @@ function evaluateRule(
       rule,
       status: 'unmeasured',
       value: undefined,
+      measurement: undefined,
       detail: `enforced from ${rule.enforcedFrom} but no harness reported a value`,
     };
   }
@@ -61,10 +63,11 @@ function evaluateRule(
       rule,
       status: 'unmeasured',
       value: undefined,
+      measurement,
       detail: `harness reported a non-finite value (${String(measurement.value)})`,
     };
   }
-  return evaluateBounds(rule, measurement.value);
+  return evaluateBounds(rule, measurement);
 }
 
 function countStatuses(results: readonly BudgetResult[]): Record<BudgetStatus, number> {

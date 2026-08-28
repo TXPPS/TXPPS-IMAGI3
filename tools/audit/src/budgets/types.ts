@@ -34,6 +34,8 @@ export interface Measurement {
   readonly value: number;
   /** Free-form provenance, e.g. the test file or CI job that produced it. */
   readonly origin?: string | undefined;
+  /** ISO timestamp stamped when the value was written to disk. */
+  readonly recordedAt?: string | undefined;
 }
 
 export const BUDGET_STATUSES = ['passed', 'violated', 'unmeasured', 'deferred'] as const;
@@ -44,6 +46,8 @@ export interface BudgetResult {
   readonly rule: BudgetRule;
   readonly status: BudgetStatus;
   readonly value?: number | undefined;
+  /** The measurement behind this result, so reports can show its provenance. */
+  readonly measurement?: Measurement | undefined;
   /** Human-readable explanation, always present for non-passing statuses. */
   readonly detail: string;
 }

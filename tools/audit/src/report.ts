@@ -9,6 +9,9 @@ const STATUS_MARK: Readonly<Record<BudgetStatus, string>> = {
 
 const ID_COLUMN_SLACK = 2;
 const STATUS_COLUMN_WIDTH = 5;
+const ROW_INDENT = '  ';
+/** Aligns a continuation line under the rule id column. */
+const PROVENANCE_INDENT = ' '.repeat(ROW_INDENT.length + STATUS_COLUMN_WIDTH + 1);
 
 function padEnd(text: string, width: number): string {
   return text.length >= width ? text : text + ' '.repeat(width - text.length);
@@ -16,7 +19,23 @@ function padEnd(text: string, width: number): string {
 
 function formatRow(result: BudgetResult, idWidth: number): string {
   const mark = padEnd(STATUS_MARK[result.status], STATUS_COLUMN_WIDTH);
-  return `  ${mark} ${padEnd(result.rule.id, idWidth)} ${result.detail}`;
+  const row = `${ROW_INDENT}${mark} ${padEnd(result.rule.id, idWidth)} ${result.detail}`;
+  const provenance = formatProvenance(result);
+  return provenance === '' ? row : `${row}\n${PROVENANCE_INDENT}${provenance}`;
+}
+
+/**
+ * A number without a source is not evidence. Rows that carry a measurement
+ * report where it came from and when, so a reader can tell a fresh run from a
+ * stale file left over from an earlier one.
+ */
+function formatProvenance(result: BudgetResult): string {
+  const measurement = result.measurement;
+  if (measurement === undefined) return '';
+  const parts = [measurement.origin, measurement.recordedAt].filter(
+    (part): part is string => part !== undefined && part.length > 0,
+  );
+  return parts.length === 0 ? '' : `via ${parts.join(' at ')}`;
 }
 
 /** Render a budget report as a fixed-width text table for CI logs. */

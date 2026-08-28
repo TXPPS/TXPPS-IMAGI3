@@ -22,6 +22,7 @@ function parseMeasurement(raw: unknown, where: string): Measurement {
   const id = record['id'];
   const value = record['value'];
   const origin = record['origin'];
+  const recordedAt = record['recordedAt'];
   if (typeof id !== 'string' || id.length === 0) {
     throw new MeasurementError(`${where}.id must be a non-empty string`);
   }
@@ -31,7 +32,10 @@ function parseMeasurement(raw: unknown, where: string): Measurement {
   if (origin !== undefined && typeof origin !== 'string') {
     throw new MeasurementError(`${where}.origin must be a string when present`);
   }
-  return { id, value, origin };
+  if (recordedAt !== undefined && typeof recordedAt !== 'string') {
+    throw new MeasurementError(`${where}.recordedAt must be a string when present`);
+  }
+  return { id, value, origin, recordedAt };
 }
 
 /** Parse a measurement array that a harness produced. */
@@ -52,15 +56,20 @@ export function mergeMeasurements(batches: readonly (readonly Measurement[])[]):
   return [...byId.values()];
 }
 
-/** Append a harness's measurements to the shared collection directory. */
+/**
+ * Append a harness's measurements to the shared collection directory, stamping
+ * each with the time it was written so a report can show which run produced it.
+ */
 export function writeMeasurements(
   harnessName: string,
   measurements: readonly Measurement[],
   directory: string = MEASUREMENT_DIR,
 ): string {
   mkdirSync(directory, { recursive: true });
+  const recordedAt = new Date().toISOString();
+  const stamped = measurements.map((m) => ({ ...m, recordedAt: m.recordedAt ?? recordedAt }));
   const path = join(directory, `${harnessName}${FILE_SUFFIX}`);
-  writeFileSync(path, `${JSON.stringify(measurements, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify(stamped, null, 2)}\n`);
   return path;
 }
 
