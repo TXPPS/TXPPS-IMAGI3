@@ -1,6 +1,7 @@
 export * from './phases.ts';
 export * from './validate.ts';
 export * from './profiles.ts';
+export * from './budgets/frames.ts';
 export * from './budgets/throttle.ts';
 export * from './budgets/types.ts';
 export * from './budgets/load.ts';

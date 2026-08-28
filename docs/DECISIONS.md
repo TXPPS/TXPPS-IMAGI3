@@ -565,3 +565,89 @@ member (both need information the document does not carry, and the second would
 put a timestamp in the schema, which ADR-0012 forbids); leaving the document
 cyclic and making every traversal defensive (moves the cost to every reader and
 guarantees one of them forgets).
+
+---
+
+## ADR-0015 — The play-mode frame budget splits into a measured half and a deferred half
+
+**Status:** accepted, P1.
+
+### Decision
+
+`playmode.fps.tablet.reference2d` (60fps on the reference 2D scene, throttled
+tablet profile) **cannot be measured in this environment** and is deferred to P9
+as **DV-007** in the DEVICE-VERIFIED register, at its full value. In its place,
+`playmode.cpuFrame.{tablet,phone}.reference2d` is enforced from P1: the engine's
+own CPU work per frame — simulation plus scene-graph update, with rasterisation
+excluded — capped at 8ms.
+
+This is the only budget in the repository whose enforcement has been pushed
+past the phase the brief assigns it, and the conditions that make the deferral
+legitimate are asserted in `real-config.test.ts` rather than argued in prose.
+
+### The evidence, because "we cannot measure it" is a claim like any other
+
+CI has no GPU; Chromium renders through SwiftShader. Frame cost therefore scales
+with pixels rather than with the engine's work, and the measurements say so
+plainly:
+
+| Profile     | Entities | DPR | p95 frame | p95 fps |
+| ----------- | -------- | --- | --------- | ------- |
+| desktop, 1x | 1        | 1   | 16.9ms    | 59.5    |
+| desktop, 1x | 400      | 1   | 26.2ms    | 38.2    |
+| desktop, 1x | 400      | 2   | 59.9ms    | 16.7    |
+| tablet, 4x  | 1        | 2   | 83.0ms    | 12.0    |
+| tablet, 4x  | 400      | 2   | 110.6ms   | 9.0     |
+
+Two rows settle it. **The throttled tablet profile misses 60fps with a single
+entity on screen**, before the engine has done anything at all. And identical
+scene logic at DPR 1 versus DPR 2 — the same 400 entities, four times the
+fragments — costs 26ms versus 60ms. The budget as stated measures the software
+rasteriser.
+
+The engine's own contribution, measured separately, is 2.5ms at the median on
+the same throttled tablet profile: **15% of a 60fps frame**. There is no reason
+to believe the engine misses the target on real hardware, and no way to
+demonstrate that here.
+
+### Why an engine-CPU budget rather than a relaxed frame rate
+
+Lowering the frame target to what SwiftShader can manage would produce a number
+that passes and means nothing — it would track the rasteriser's performance and
+would not move if the engine got ten times slower at anything that is not
+fragment-bound. Excluding rasterisation instead gives a budget that is entirely
+about code in this repository, and that fails when that code regresses.
+
+The ceiling is **derived**: half of a 16.67ms frame, rounded down to 8ms. The
+other half must cover rasterisation, compositing, browser overhead, and the
+gameplay logic a real project adds on top of everything measured here. An engine
+past half the frame on its own has left no room for the game it exists to run.
+
+### Why the median, when every other budget here gates on the tail
+
+Cold load takes the worst of three; the frame-rate reduction takes the 95th
+percentile. Both gate on the tail because there the tail is the user's
+experience. This budget takes the **median**, because here the tail is the
+instrument.
+
+Five runs of unchanged code measured a p95 between 6.8ms and 8.7ms while the
+median stayed between 2.5ms and 3.9ms. CDP throttling advances by periodically
+sleeping the renderer, so whether a sleep lands inside a two-millisecond timed
+section is close to a coin flip. A gate whose run-to-run spread exceeds the
+regression it exists to catch fails for noise and passes for real regressions,
+at random. The p95 is still recorded in the measurement's detail, because a tail
+worth watching is not the same as a tail worth gating on.
+
+### Consequences to be honest about
+
+**The P1 gate does not establish that the engine renders the reference scene at
+60fps on a tablet.** It establishes that the engine's own per-frame cost leaves
+room to, and that the claim is tracked. DV-007 blocks the Definition of Done and
+closes no phase, which is the whole reason the two registers exist.
+
+**Rejected:** relaxing the frame target to what CI can reach (a number that
+tracks SwiftShader and would not move if the engine regressed); measuring on the
+unthrottled desktop profile only (loses the CPU-throttling signal, which is
+real, in order to escape the GPU problem, which is not the same problem);
+gating on the p95 anyway and accepting flakes (a gate that fails at random
+teaches people to re-run it, which is worse than not having it).

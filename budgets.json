@@ -1,5 +1,5 @@
 {
-  "currentPhase": "P0",
+  "currentPhase": "P1",
   "rules": [
     {
       "id": "ci-headless.editor.coldLoad",
@@ -46,8 +46,26 @@
       "unit": "fps",
       "scope": "tablet",
       "min": 60,
+      "enforcedFrom": "P9",
+      "source": "Brief P1 gate. Deferred to P9: it cannot be measured without a GPU. CI renders through SwiftShader, where an empty scene already costs 83ms per frame on the throttled tablet profile. See ADR-0015, GAP-011 and DV-007; the CI-measurable half is playmode.cpuFrame.tablet.reference2d."
+    },
+    {
+      "id": "playmode.cpuFrame.tablet.reference2d",
+      "description": "Engine CPU work per frame on the reference 2D scene, tablet profile. Simulation plus scene-graph update; rasterisation is excluded and this makes no GPU claim.",
+      "unit": "ms",
+      "scope": "tablet",
+      "max": 8,
       "enforcedFrom": "P1",
-      "source": "brief-4-performance"
+      "source": "Derived: half of a 16.67ms 60Hz frame, rounded down. The other half must cover rasterisation, compositing and the gameplay a real project adds. Measured at 5.4ms p95 on the throttled tablet profile. See ADR-0015."
+    },
+    {
+      "id": "playmode.cpuFrame.phone.reference2d",
+      "description": "Engine CPU work per frame on the reference 2D scene, phone profile. Simulation plus scene-graph update; rasterisation is excluded and this makes no GPU claim.",
+      "unit": "ms",
+      "scope": "phone",
+      "max": 8,
+      "enforcedFrom": "P1",
+      "source": "Derived: half of a 16.67ms 60Hz frame, rounded down. The other half must cover rasterisation, compositing and the gameplay a real project adds. Measured at 5.4ms p95 on the throttled tablet profile. See ADR-0015."
     },
     {
       "id": "playmode.fps.phone.reference3d",

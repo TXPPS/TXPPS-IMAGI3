@@ -310,3 +310,42 @@ operation under a CRDT — rewriting every sibling's key is a write to every
 sibling, which is the exact conflict pattern fractional indices exist to avoid.
 The remedy is therefore a _jitter_ on key generation rather than a rebalance,
 and that choice needs its own ADR before it is implemented.
+
+---
+
+## GAP-011 — No GPU: every frame-rate claim is software-rasterised
+
+**Status:** open. **Blocks:** honest sign-off of the P1 gate, tracked as DV-007.
+
+CI has no GPU. Chromium renders through SwiftShader, so frame cost scales with
+pixels rather than with the engine's work, and nothing here can support a
+frame-rate claim about any device.
+
+The measurements are in ADR-0015. The two that settle it: the throttled tablet
+profile misses 60fps with **one** entity on screen, and identical scene logic at
+DPR 1 versus DPR 2 costs 26ms versus 60ms per frame.
+
+What is measured instead, and enforced from P1, is the engine's own CPU work per
+frame with rasterisation excluded — 2.5ms at the median on the throttled tablet
+profile, against an 8ms ceiling. That is a real budget on code in this
+repository. It is not a frame-rate claim and must never be reported as one.
+
+**Manual procedure (required before claiming DV-007):**
+
+1. Serve a production build to a real tablet — the reference device is an
+   iPad running Safari, since it is the constrained target and the one with no
+   WebGPU.
+2. Open `/?play=reference2d`, let it run for 30 seconds, and read
+   `window.__imagi3FrameSamples()`.
+3. Confirm the p95 whole-frame duration is at or under 16.67ms across the
+   sample window, with 400 entities and a non-zero step count in the same
+   artifact.
+4. Repeat on a mid-range Android tablet in Chrome, and on an iPhone for the
+   phone profile.
+5. Record the numbers, the devices and the OS versions in docs/BUDGETS.md, and
+   move `playmode.fps.tablet.reference2d` back to `enforcedFrom: P1`.
+
+**What would invalidate the deferral rather than close it:** if the engine's
+own CPU budget ever needs raising to pass, the deferral stops being about the
+GPU. The 8ms ceiling is derived from the frame budget, not fitted to the
+measurement, and raising it is a decision that needs its own ADR.

@@ -8,6 +8,9 @@
       "path": "./packages/runtime"
     },
     {
+      "path": "./packages/render"
+    },
+    {
       "path": "./tools/audit"
     },
     {

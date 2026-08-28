@@ -10,5 +10,10 @@
   },
   "devDependencies": {
     "vite": "7.2.7"
+  },
+  "dependencies": {
+    "@imagi3/core": "workspace:*",
+    "@imagi3/render": "workspace:*",
+    "@imagi3/runtime": "workspace:*"
   }
 }

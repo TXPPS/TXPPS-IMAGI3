@@ -1,0 +1,17 @@
+{
+  "name": "@imagi3/render",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@imagi3/core": "workspace:*",
+    "@imagi3/runtime": "workspace:*",
+    "three": "0.181.0"
+  }
+}

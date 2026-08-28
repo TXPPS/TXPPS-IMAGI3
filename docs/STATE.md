@@ -2,8 +2,8 @@
 
 <!-- Rewrite this file after every completed task. Prune aggressively. -->
 
-**Phase:** P0
-**Phase status:** P0 and P1-PRE closed. P1 in progress: core is complete through the load boundary — schema, canonical serialisation, deterministic graph repair and the fuzz suite are landed and green. `packages/runtime` has not been started.
+**Phase:** P1
+**Phase status:** P0 and P1-PRE closed. P1 code complete and green: core, runtime, renderer and play mode all landed, with `budgets.json` bumped to P1 so `runtime.bundle.gzip` and the play-mode frame budgets are enforced. Awaiting role sign-off.
 
 <!-- The **Phase:** line above is a machine contract: a test requires it to
      match budgets.json currentPhase, so it must be one of the brief's phase
@@ -14,36 +14,34 @@
 
 ## In flight
 
-P1, past the halfway point. Landed and green: the canonical serializer,
-fractional ordering keys, opaque ids, scene schema v1, the migration registry,
-the round-trip property test at up to 10,000 entities, **deterministic graph
-repair** (`repairSceneGraph`) with its convergence properties, and the **fuzz
-suite** over the load boundary.
+**P1 is code complete and green.** Landed: the canonical serializer, fractional
+ordering keys, opaque ids, scene schema v1, the migration registry, the
+round-trip property test at 10,000 entities, deterministic graph repair with its
+convergence properties, the fuzz suite over the load boundary, the
+fixed-timestep runtime with its determinism gate, the three.js WebGL2 renderer,
+input abstraction, and play mode on a generated 400-sprite reference scene.
 
 Also landed, from the standing items: the claims ledger, the shell-edit ban, the
 guard audit, and raw-sample throttling provenance.
 
 ## Next 3 actions
 
-1. `packages/runtime`: fixed-timestep tick loop with an accumulator, render
-   interpolating between steps, wall clock never driving simulation. Inject the
-   clock and the RNG; `Date.now` and `Math.random` are forbidden in core and
-   runtime alike.
-2. The determinism test — same seed and input tape produce an identical entity
-   state hash after 10,000 ticks, run twice in the suite. Hash the serialized
-   entity state, not the objects: assert a property of the artifact, not of the
-   code that produced it.
-3. The three.js renderer on the **WebGL2 path**, which is primary. Wire the
-   parity harness with the WebGPU leg reporting UNMEASURED, never PASS — it is
-   DV-001 in the deferred register.
+1. **The P1 gate.** QA Automation, Visual QA and Performance each sign
+   independently in `docs/GATES.md`, from a detached worktree at a tagged
+   commit. Sign-off is a test artifact plus a table row, never a claim. The
+   thing to review hardest is ADR-0015: one budget's enforcement was pushed from
+   P1 to P9, and that is the move this project's own rules exist to catch.
+2. **Asset resolution**, the one part of the P1 scope not built. Content
+   addressing (`assets/<sha256>.<ext>` plus `asset-index.json`) is fixed by the
+   brief; the runtime side is resolving a hash to bytes with a cache that does
+   not pin everything in memory.
+3. **P2**, once the gate closes: OPFS content-addressed storage and IndexedDB
+   metadata, with local storage explicitly a cache and cloud the source of
+   truth.
 
-Then: input abstraction, asset resolution, and the reference scene meeting the
-throttled tablet frame budget.
-
-Bump `budgets.json` currentPhase to `P1` when the runtime bundle exists, and
-update the `**Phase:**` line to match; a test enforces that they agree. The bump
-turns on `runtime.bundle.gzip` and `playmode.fps.tablet.reference2d`, which then
-FAIL until measured. That friction is the mechanism, not an obstacle to it.
+RC-0008 (`addEntity` is O(n²), and the editor is its only caller) is a **P3
+blocker** with a gate condition already written. It needs a harness, not a
+decision.
 
 ## Notes for the next session
 

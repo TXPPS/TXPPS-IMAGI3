@@ -26,10 +26,32 @@ pre-release, so versions are phase milestones rather than semantic versions.
   tree or is rejected with a typed error naming the path. Found that malformed
   JSON escaped as an untyped `SyntaxError`.
 
+- `packages/runtime`: fixed-timestep tick loop with an accumulator and render
+  interpolation, input as sampled data rather than consumed events, and a
+  session that editor play mode and an exported build both construct the same
+  way. Determinism proven: same seed and input tape, identical state hash after
+  10,000 ticks, run twice.
+- `packages/render`: three.js on WebGL2, which is the primary path and not the
+  fallback. One shared geometry and material, a pooled mesh list, and no
+  allocation in the draw loop. The WebGPU renderer is genuinely wired behind a
+  dynamic import and reports `unmeasured` — never `passed` — because no adapter
+  exists here.
+- Play mode on a generated reference scene of 400 sprites, loaded as a separate
+  chunk so the editor shell's cold load does not pay for three.js.
+- `runtime.bundle.gzip` measured as its own budget: 128 KB against a 1.5 MB
+  ceiling.
+
 **Changed**
 
 - The schema boundary validates shape only. Reference integrity moved to the
   repair, because rejecting a merged document loses a peer's work.
+- `budgets.json` is at P1, so the runtime bundle and play-mode frame budgets are
+  enforced.
+- `playmode.fps.tablet.reference2d` is deferred to P9 at its full 60fps value
+  and tracked as DV-007. It cannot be measured without a GPU — CI renders
+  through SwiftShader, where the throttled tablet profile misses 60fps with one
+  entity on screen. The CI-measurable half, engine CPU work per frame with
+  rasterisation excluded, is enforced from P1 at 8ms and measures 2.5ms.
 
 ### Phase 1-PRE — Gate verifiability
 

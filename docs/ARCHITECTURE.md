@@ -36,15 +36,29 @@ never know which one is hosting it.
                       └────────────────────────┘
 ```
 
-## What exists today (P0)
+## What exists today (P1)
 
 ```
-apps/editor/          Vite PWA shell. Renders a static shell, publishes a
-                      readiness signal, and nothing else. This is the "empty
-                      app" the P0 gate is defined against.
+packages/core/        Scene schema v1, canonical serialiser, fractional ordering
+                      keys, opaque ids, migrations, and the deterministic graph
+                      repair every load runs. No DOM, no clock, no randomness
+                      that was not passed in.
+packages/runtime/     Fixed-timestep loop, simulation, input as sampled data,
+                      and the session both play mode and an export construct.
+packages/render/      three.js on WebGL2 — the primary path. Backend selection,
+                      snapshot interpolation, and the parity harness whose
+                      WebGPU leg reports UNMEASURED.
+apps/editor/          Vite PWA shell, plus play mode on a generated reference
+                      scene loaded as a separate chunk.
 tools/audit/          The audit harness, as a real package with its own tests.
+tools/repo/           Verified edits, the claims ledger, CPU-throttling probes.
 tests/e2e/            Playwright, one project per device profile.
 ```
+
+The editor shell and the runtime are separate chunks, and that is a budget
+decision rather than a structural one: the cold-load budget is measured on every
+device profile, and three.js in the entry chunk would be a regression paid for
+by every session including those that never press play.
 
 ### The readiness contract
 
