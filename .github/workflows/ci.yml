@@ -20,6 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history. The claims ledger resolves every commit a document
+          # names, and the default shallow clone cannot reach the older ones —
+          # under which the gate would fail for the wrong reason.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
@@ -39,6 +44,12 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      # Every documented code change names the commit that made it, and this
+      # asserts the commit really touches the file. Three times a fix was
+      # recorded as landed before it landed; see docs/BUGS.md RC-0005.
+      - name: Claims ledger
+        run: pnpm verify:claims
 
       - name: Unit and integration tests
         run: pnpm test

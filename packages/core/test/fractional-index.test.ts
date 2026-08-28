@@ -3,6 +3,7 @@ import {
   FractionalIndexError,
   INDEX_ALPHABET,
   firstKey,
+  isSortableIndexKey,
   isValidIndexKey,
   keyBetween,
   keysAfter,
@@ -36,6 +37,35 @@ describe('isValidIndexKey', () => {
     ['a space', 'a b', false],
   ])('classifies %s', (_label, key, expected) => {
     expect(isValidIndexKey(key)).toBe(expected);
+  });
+});
+
+/**
+ * The weaker predicate the schema boundary uses. The distinction is the whole
+ * reason a trailing-zero key is repaired rather than rejected: it sorts, so the
+ * document can be read, so refusing it would discard a peer's work over
+ * something that costs nothing to correct.
+ */
+describe('isSortableIndexKey', () => {
+  it.each([
+    ['a single digit', 'V', true],
+    ['a trailing smallest digit, which sorts but is not canonical', 'a0', true],
+    ['only the smallest digit', '0', true],
+    ['an empty key', '', false],
+    ['a character outside the alphabet', 'a-b', false],
+    ['a space', 'a b', false],
+    ['an astral character', 'a\u{1f3ae}', false],
+  ])('classifies %s', (_label, key, expected) => {
+    expect(isSortableIndexKey(key)).toBe(expected);
+  });
+
+  it('is implied by validity, never the other way round', () => {
+    // A key the strict predicate accepts must always be sortable; the reverse
+    // must not hold, or the two predicates are the same one under two names.
+    for (const key of ['V', 'a0V', '1', 'zzz']) {
+      expect(isValidIndexKey(key) && isSortableIndexKey(key)).toBe(true);
+    }
+    expect(isSortableIndexKey('a0') && !isValidIndexKey('a0')).toBe(true);
   });
 });
 
@@ -129,13 +159,53 @@ describe('ordering survives arbitrary insertion sequences', () => {
     return keys;
   }
 
-  it.each([1, 2, 3, 4, 5])('holds for seed %i over 200 insertions', (seed) => {
-    const keys = buildByRandomInsertion(seed, 200);
+  /**
+   * Twenty seeds of a thousand insertions, not five of two hundred.
+   *
+   * The count is deliberate. The bug that shipped here — `keyBetween` emitting
+   * `0`, the infimum of the whole ordering, when a lower bound ran out of
+   * digits — was invisible to inspection and took roughly two hundred random
+   * insertions to reach. A property test sized just past the fault it already
+   * found is sized to find nothing new, so this runs an order of magnitude
+   * deeper. Seeds are fixed, so a failure names a run that can be repeated.
+   */
+  const SEEDS = Array.from({ length: 20 }, (_, index) => index + 1);
+  const INSERTIONS = 1000;
 
-    expect(keys).toHaveLength(200);
+  it.each(SEEDS)(`holds for seed %i over ${String(INSERTIONS)} insertions`, (seed) => {
+    const keys = buildByRandomInsertion(seed, INSERTIONS);
+
+    expect(keys).toHaveLength(INSERTIONS);
     expect(new Set(keys).size, 'keys must be unique').toBe(keys.length);
     expect([...keys].sort(), 'sorted order must match insertion order').toEqual(keys);
     for (const key of keys) expect(isValidIndexKey(key)).toBe(true);
+  });
+
+  /**
+   * The invariant restated as its consequence, because "valid" is a predicate
+   * a future edit could weaken. Every generated key must be strictly between
+   * the bounds it was asked for, and must never be the infimum of the ordering
+   * — a key nothing can precede is a position that can never be prepended to
+   * again, which is data loss deferred by months.
+   */
+  it.each(SEEDS.slice(0, 10))('never generates an unprependable key for seed %i', (seed) => {
+    const random = createRandom(seed);
+    const keys: string[] = [];
+    for (let i = 0; i < 400; i += 1) {
+      const position = Math.floor(random.next() * (keys.length + 1));
+      const lower = position === 0 ? null : (keys[position - 1] ?? null);
+      const upper = position === keys.length ? null : (keys[position] ?? null);
+      const key = keyBetween(lower, upper);
+
+      if (lower !== null) expect(lower < key, `"${key}" is not above "${lower}"`).toBe(true);
+      if (upper !== null) expect(key < upper, `"${key}" is not below "${upper}"`).toBe(true);
+      // The supremum has no representation to compare against; the infimum
+      // does, and it is the one that has actually been produced by mistake.
+      expect(key.endsWith('0'), `"${key}" is an infimum nothing can sort before`).toBe(false);
+      expect(() => keyBetween(null, key), `nothing fits before "${key}"`).not.toThrow();
+
+      keys.splice(position, 0, key);
+    }
   });
 
   it('keeps keys short enough to be practical', () => {

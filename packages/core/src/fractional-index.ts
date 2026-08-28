@@ -59,10 +59,17 @@ function digitAt(key: string, position: number): string {
   return key[position] ?? SMALLEST_DIGIT;
 }
 
-/** A key is valid when it is non-empty, all digits, and has no trailing zero. */
-export function isValidIndexKey(key: string): boolean {
+/**
+ * Whether a key can be *ordered* — non-empty and made only of alphabet digits.
+ *
+ * The weaker of the two predicates, and the one the schema boundary uses. A key
+ * that sorts is a key the document can be read with, so a document carrying one
+ * must load; anything else discards a peer's work over a fault that costs
+ * nothing to correct. Sorting is where the line actually falls: a key with a
+ * character outside the alphabet has no defined position at all.
+ */
+export function isSortableIndexKey(key: string): boolean {
   if (key.length === 0) return false;
-  if (key.endsWith(SMALLEST_DIGIT)) return false;
   // Iterating by code point is correct here even though the alphabet is ASCII:
   // an astral character arrives as one two-unit string, which is not in the
   // alphabet and is rejected, rather than as two units that might each pass.
@@ -70,6 +77,19 @@ export function isValidIndexKey(key: string): boolean {
     if (!INDEX_ALPHABET.includes(character)) return false;
   }
   return true;
+}
+
+/**
+ * Whether a key is canonical: sortable, and with no trailing smallest digit.
+ *
+ * The stronger predicate, and what generation must always produce. A key ending
+ * in `0` sorts perfectly well and is still wrong: it is the infimum of the
+ * range below it, so nothing can ever be inserted before it. That is a fault
+ * that appears months later as an insertion that cannot be expressed, which is
+ * why it is repaired at load rather than tolerated.
+ */
+export function isValidIndexKey(key: string): boolean {
+  return isSortableIndexKey(key) && !key.endsWith(SMALLEST_DIGIT);
 }
 
 function assertValid(key: string, label: string): void {

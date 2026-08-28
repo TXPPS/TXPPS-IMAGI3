@@ -119,10 +119,24 @@ export function canonicalize(value: unknown): string {
 /**
  * Parse canonical JSON back to a value.
  *
- * Deliberately just `JSON.parse`: canonical text is ordinary JSON, and the
- * round-trip property being asserted is `canonicalize(parse(text)) === text`,
- * which a bespoke parser would only make harder to trust.
+ * Deliberately just `JSON.parse` for the parsing itself: canonical text is
+ * ordinary JSON, and the round-trip property being asserted is
+ * `canonicalize(parse(text)) === text`, which a bespoke parser would only make
+ * harder to trust.
+ *
+ * The one thing added is the error type. A raw `SyntaxError` escaping from here
+ * is indistinguishable, to a caller, from a bug in the engine — and the editor
+ * has to tell a user which of the two just happened before it can decide
+ * whether to offer them a retry or a bug report. Found by the fuzz suite, which
+ * asserts that every rejection is typed.
+ *
+ * @throws {CanonicalError} when the text is not JSON.
  */
 export function parseCanonical(text: string): unknown {
-  return JSON.parse(text);
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new CanonicalError(`document is not valid JSON: ${reason}`, '$');
+  }
 }

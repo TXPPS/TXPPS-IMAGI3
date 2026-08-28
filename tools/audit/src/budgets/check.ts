@@ -1,6 +1,7 @@
 import { isPhaseAtLeast } from '../phases.ts';
 import { DEVICE_PROFILES, isDeviceProfileId } from '../profiles.ts';
 import { isCiHeadlessBudget } from './ids.ts';
+import { firstProbeFault, observedThrottleRatio } from './throttle.ts';
 import {
   BUDGET_STATUSES,
   type BudgetDocument,
@@ -65,11 +66,20 @@ export function requiredThrottleRatio(rule: BudgetRule, rules: readonly BudgetRu
  * device-named budget measured at full desktop speed while the throttling
  * self-test stayed green on a different page. See RC-0006.
  *
- * What this proves and what it does not: it proves the declared rate reached
- * the page that was measured. It cannot prove the declaration is meaningful —
- * a profile declaring rate 1 is exempt here, and is covered instead by the
- * naming-honesty test and the ordering gate. Nor can it distinguish a measured
- * ratio from a hand-written one; that is the floor of artifact checking.
+ * The slowdown is **derived here from raw samples**, never read from the
+ * measurement. A harness that reports a conclusion instead of observations is
+ * attesting its own work, which is the failure this whole mechanism exists to
+ * make impossible; a measurement carrying a number but no samples has no
+ * evidence at all and lands on `unthrottled`.
+ *
+ * What this proves and what it does not: it proves that the workload named by
+ * the probe really ran, that it ran long enough to span CDP's sleep cycles, and
+ * that the same workload on the same page in the same run was slower with
+ * throttling on than off. It cannot prove the declaration is meaningful — a
+ * profile declaring rate 1 is exempt here, and is covered instead by the
+ * naming-honesty test and the ordering gate. Nor can it stop a harness that
+ * computes plausible timings without running anything; nothing in a file can
+ * attest itself, and that limit is stated rather than papered over.
  */
 function checkThrottlingEvidence(
   rule: BudgetRule,
@@ -80,14 +90,29 @@ function checkThrottlingEvidence(
   const expected = DEVICE_PROFILES[rule.scope].cpuThrottlingRate;
   if (expected <= 1) return undefined;
 
-  const required = requiredThrottleRatio(rule, rules);
-  const observed = measurement.throttleRatio;
-  if (observed === undefined) {
-    return `scoped to ${rule.scope} (throttled ${String(expected)}x) but the measurement records no throttleRatio`;
+  const probes = measurement.throttle;
+  if (probes === undefined || probes.length === 0) {
+    return (
+      `scoped to ${rule.scope} (throttled ${String(expected)}x) but the measurement carries ` +
+      'no throttling probe, so nothing evidences the rate reaching the page it was measured on'
+    );
   }
+  const mismatched = probes.find((probe) => probe.requestedRate !== expected);
+  if (mismatched !== undefined) {
+    return (
+      `probed at rate ${String(mismatched.requestedRate)} but the ${rule.scope} profile ` +
+      `declares ${String(expected)}`
+    );
+  }
+  const fault = firstProbeFault(probes);
+  if (fault !== undefined) return `throttling probe is not usable evidence: ${fault}`;
+
+  const required = requiredThrottleRatio(rule, rules);
+  const observed = observedThrottleRatio(probes);
   if (!Number.isFinite(observed) || observed < required) {
     return (
-      `measured at ${String(observed)}x CPU throttling, below the ${required.toFixed(2)}x this ` +
+      `${String(probes.length)} probe${probes.length === 1 ? '' : 's'} evidence ` +
+      `${observed.toFixed(2)}x CPU throttling, below the ${required.toFixed(2)}x this ` +
       `budget needs to catch anything the unthrottled budget would not catch first`
     );
   }

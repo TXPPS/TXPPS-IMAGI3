@@ -1,5 +1,5 @@
 import { isId, type ComponentId, type EntityId } from '../ids.ts';
-import { isValidIndexKey } from '../fractional-index.ts';
+import { isSortableIndexKey } from '../fractional-index.ts';
 import {
   COMPONENT_FIELDS,
   DOCUMENT_FIELDS,
@@ -135,7 +135,10 @@ function validateEntity(raw: unknown, id: EntityId, path: string): Entity {
   }
 
   const order = requireString(record, 'order', path);
-  if (!isValidIndexKey(order)) fail(`"${order}" is not a valid ordering key`, `${path}.order`);
+  // Sortable, not canonical. A key ending in the smallest digit orders fine and
+  // is repaired at load; rejecting it here would refuse a document over a fault
+  // that costs nothing to correct. See `graph.ts` and ADR-0013.
+  if (!isSortableIndexKey(order)) fail(`"${order}" is not a valid ordering key`, `${path}.order`);
 
   const componentsRaw = asRecord(record['components'], `${path}.components`);
   const components: Record<ComponentId, Component> = {};
@@ -156,31 +159,21 @@ function validateEntity(raw: unknown, id: EntityId, path: string): Entity {
   };
 }
 
-/** Parent references must point at entities that exist in this document. */
-function validateParentReferences(entities: Readonly<Record<EntityId, Entity>>): void {
-  for (const entity of Object.values(entities)) {
-    if (entity.parent === null) continue;
-    if (!Object.hasOwn(entities, entity.parent)) {
-      fail(
-        `parent "${entity.parent}" does not exist in this document`,
-        `$.entities.${entity.id}.parent`,
-      );
-    }
-    if (entity.parent === entity.id) {
-      fail('an entity cannot be its own parent', `$.entities.${entity.id}.parent`);
-    }
-  }
-}
-
 /**
  * Validate a parsed document.
  *
- * Cycles among parents are deliberately **not** rejected here. They are a
- * legitimate outcome of a concurrent merge — two peers reparenting A under B
- * and B under A are each making a valid edit — so they are repaired
- * deterministically at load rather than treated as corruption. Rejecting the
- * document would turn a routine concurrent edit into data loss. See
- * `graph.ts` and ADR-0012.
+ * **Reference integrity is deliberately not checked here.** A parent pointing
+ * at a deleted entity, a parent cycle, and an entity parented to itself are all
+ * legitimate outcomes of a concurrent merge: two peers each making a valid edit
+ * produce them, and neither peer did anything wrong. Rejecting the document
+ * would turn a routine concurrent edit into data loss, so they are repaired
+ * deterministically at load instead.
+ *
+ * This boundary therefore checks *shape*: types, unknown fields, ids agreeing
+ * with their keys, values that can survive a round trip. What it guarantees is
+ * that a document can be read, not that it describes a tree. Use
+ * `loadSceneDocument` for that guarantee — validation alone does not give it.
+ * See `graph.ts` and ADR-0013.
  *
  * @throws {SchemaError} naming the path of the first fault found.
  */
@@ -208,7 +201,6 @@ export function validateSceneDocument(raw: unknown): SceneDocument {
   for (const entityId of Object.keys(entitiesRaw)) {
     entities[entityId] = validateEntity(entitiesRaw[entityId], entityId, `$.entities.${entityId}`);
   }
-  validateParentReferences(entities);
 
   return { schemaVersion, id, name: requireString(record, 'name', '$'), entities };
 }

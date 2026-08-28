@@ -1,4 +1,5 @@
 import { keyBetween } from '../fractional-index.ts';
+import { childrenOf } from '../graph.ts';
 import type { IdFactory } from '../ids.ts';
 import type { ComponentId, EntityId, SceneId } from '../ids.ts';
 import {
@@ -52,26 +53,6 @@ export function sceneFrom(id: SceneId, name: string, entities: readonly Entity[]
     byId[entity.id] = entity;
   }
   return { schemaVersion: SCHEMA_VERSION, id, name, entities: byId };
-}
-
-/** Children of an entity, in sibling order. */
-export function childrenOf(document: SceneDocument, parent: EntityId | null): Entity[] {
-  return Object.values(document.entities)
-    .filter((entity) => entity.parent === parent)
-    .sort(compareSiblings);
-}
-
-/**
- * Sibling ordering: by key, then by id.
- *
- * The id tiebreak is not decoration. Two peers can concurrently generate the
- * same ordering key, and without a total order the two would sort differently
- * on each peer — a divergence no merge can repair because both are "correct".
- */
-export function compareSiblings(a: Entity, b: Entity): number {
-  if (a.order !== b.order) return a.order < b.order ? -1 : 1;
-  if (a.id === b.id) return 0;
-  return a.id < b.id ? -1 : 1;
 }
 
 export interface AddEntityOptions {

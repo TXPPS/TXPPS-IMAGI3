@@ -9,6 +9,7 @@ import {
   readAllMeasurements,
   writeMeasurements,
 } from '../src/measurements.ts';
+import { probe } from './helpers/probes.ts';
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'imagi3-measure-'));
@@ -97,20 +98,37 @@ describe('measurement files', () => {
  * the field on read or on write fails closed rather than open, but silently.
  */
 describe('throttling evidence round-trip', () => {
-  it('survives a write and read unchanged', () => {
+  it('survives a write and read with every raw sample intact', () => {
     const dir = tempDir();
-    writeMeasurements('harness', [{ id: 'a', value: 1, throttleRatio: 4.25 }], dir);
-    expect(readAllMeasurements(dir)[0]?.throttleRatio).toBe(4.25);
+    const sample = probe(4.25);
+    writeMeasurements('harness', [{ id: 'a', value: 1, throttle: [sample] }], dir);
+    // Deep equality, not a spot check on the ratio. The samples are the
+    // evidence; a round trip that preserved a summary and dropped the rest
+    // would be the whole failure this shape exists to prevent.
+    expect(readAllMeasurements(dir)[0]?.throttle).toEqual([sample]);
   });
 
   it('stays undefined when the harness did not record it', () => {
     const dir = tempDir();
     writeMeasurements('harness', [{ id: 'a', value: 1 }], dir);
-    expect(readAllMeasurements(dir)[0]?.throttleRatio).toBeUndefined();
+    expect(readAllMeasurements(dir)[0]?.throttle).toBeUndefined();
   });
 
-  it('rejects a non-numeric throttling record rather than dropping it', () => {
-    expect(() => parseMeasurements([{ id: 'a', value: 1, throttleRatio: '4' }], 'w')).toThrow(
+  it('rejects a probe that is not an object rather than dropping it', () => {
+    expect(() => parseMeasurements([{ id: 'a', value: 1, throttle: [4] }], 'w')).toThrow(
+      MeasurementError,
+    );
+  });
+
+  it('rejects a scalar throttle field, which is what the old shape looked like', () => {
+    expect(() => parseMeasurements([{ id: 'a', value: 1, throttle: 4.25 }], 'w')).toThrow(
+      MeasurementError,
+    );
+  });
+
+  it('rejects a probe whose samples are not numbers', () => {
+    const bad = { ...probe(4), controlMs: ['100'] };
+    expect(() => parseMeasurements([{ id: 'a', value: 1, throttle: [bad] }], 'w')).toThrow(
       MeasurementError,
     );
   });

@@ -5,6 +5,7 @@ import {
   requiredThrottleRatio,
 } from '../../src/budgets/check.ts';
 import type { BudgetDocument, BudgetRule } from '../../src/budgets/types.ts';
+import { probe } from '../helpers/probes.ts';
 
 function rule(overrides: Partial<BudgetRule> = {}): BudgetRule {
   return {
@@ -122,7 +123,7 @@ describe('throttling evidence', () => {
   const doc = document([tabletRule]);
 
   it('accepts a device-scoped measurement carrying adequate throttling', () => {
-    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttleRatio: 3.7 }]);
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttle: [probe(3.7)] }]);
     expect(report.results[0]!.status).toBe('passed');
     expect(report.ok).toBe(true);
   });
@@ -130,19 +131,56 @@ describe('throttling evidence', () => {
   it('rejects a device-scoped measurement with no throttling record at all', () => {
     const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50 }]);
     expect(report.results[0]!.status).toBe('unthrottled');
-    expect(report.results[0]!.detail).toContain('records no throttleRatio');
+    expect(report.results[0]!.detail).toContain('no throttling probe');
     expect(report.ok).toBe(false);
   });
 
   it('rejects a device-scoped measurement taken at desktop speed', () => {
-    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttleRatio: 1 }]);
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttle: [probe(1)] }]);
     expect(report.results[0]!.status).toBe('unthrottled');
     expect(report.ok).toBe(false);
   });
 
-  it('rejects a non-finite throttling record', () => {
-    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttleRatio: Number.NaN }]);
+  it('rejects an empty probe list, which is a record of nothing', () => {
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttle: [] }]);
     expect(report.results[0]!.status).toBe('unthrottled');
+  });
+
+  /**
+   * The mutation the raw-sample design exists for. A harness that keeps
+   * reporting a healthy slowdown after its throttling is gone is the exact
+   * shape of RC-0006, and under the old scalar field it was undetectable: the
+   * gate had no way to disagree with the number it was handed. Now the number
+   * is not in the artifact, so there is nothing to disagree with — the gate
+   * derives the ratio or it has no evidence.
+   */
+  it('rejects a plausible ratio asserted without samples behind it', () => {
+    const forged = { ...probe(4.5), controlMs: [], throttledMs: [] };
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttle: [forged] }]);
+    expect(report.results[0]!.status).toBe('unthrottled');
+    expect(report.results[0]!.detail).toContain('control samples are empty');
+  });
+
+  it('rejects a probe whose rate disagrees with the profile it claims', () => {
+    const wrongRate = { ...probe(4.5), requestedRate: 6 };
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttle: [wrongRate] }]);
+    expect(report.results[0]!.status).toBe('unthrottled');
+    expect(report.results[0]!.detail).toContain('the tablet profile declares 4');
+  });
+
+  it('rejects a probe that claims a workload it did not run', () => {
+    const wrongChecksum = { ...probe(4.5), checksum: 12345 };
+    const report = checkBudgets(doc, [{ id: 'demo.tablet', value: 50, throttle: [wrongChecksum] }]);
+    expect(report.results[0]!.status).toBe('unthrottled');
+    expect(report.results[0]!.detail).toContain('checksum');
+  });
+
+  it('takes the median across pages, so one lucky page cannot carry the run', () => {
+    const report = checkBudgets(doc, [
+      { id: 'demo.tablet', value: 50, throttle: [probe(1), probe(1.1), probe(9)] },
+    ]);
+    expect(report.results[0]!.status).toBe('unthrottled');
+    expect(report.results[0]!.detail).toContain('3 probes evidence 1.10x');
   });
 
   it('does not demand throttling evidence from an unthrottled scope', () => {
@@ -205,7 +243,7 @@ describe('requiredThrottleRatio', () => {
     const doc = { currentPhase: 'P0' as const, rules: [unthrottled, throttled] };
     const report = checkBudgets(doc, [
       { id: 'ci-headless.demo', value: 100 },
-      { id: 'demo.tablet', value: 100, throttleRatio: 1.79 },
+      { id: 'demo.tablet', value: 100, throttle: [probe(1.79)] },
     ]);
     expect(report.results.find((r) => r.rule.id === 'demo.tablet')?.status).toBe('unthrottled');
   });
@@ -215,7 +253,7 @@ describe('requiredThrottleRatio', () => {
     const doc = { currentPhase: 'P0' as const, rules: [unthrottled, throttled] };
     const report = checkBudgets(doc, [
       { id: 'ci-headless.demo', value: 100 },
-      { id: 'demo.tablet', value: 100, throttleRatio: 2 },
+      { id: 'demo.tablet', value: 100, throttle: [probe(2)] },
     ]);
     expect(report.results.find((r) => r.rule.id === 'demo.tablet')?.status).toBe('passed');
   });

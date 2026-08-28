@@ -134,7 +134,7 @@ test.describe('planted CPU regression', () => {
 
     const budgetId = COLD_LOAD_BUDGET_IDS[profile.id];
     const report = checkBudgets(loadBudgets(), [
-      { id: budgetId, value: elapsedMs, throttleRatio: throttle.observedRatio },
+      { id: budgetId, value: elapsedMs, throttle: [throttle.probe] },
     ]);
     const status = report.results.find((r) => r.rule.id === budgetId)?.status;
 

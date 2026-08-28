@@ -62,7 +62,7 @@ test.describe('planted faults', () => {
     // The throttling evidence is required: the gate rejects a device-scoped
     // measurement that cannot show the page it came from was throttled.
     const report = checkBudgets(loadBudgets(), [
-      { id: budgetId, value: elapsedMs, throttleRatio: throttle.observedRatio },
+      { id: budgetId, value: elapsedMs, throttle: [throttle.probe] },
     ]);
     const result = report.results.find((r) => r.rule.id === budgetId);
 
@@ -77,7 +77,7 @@ test.describe('planted faults', () => {
     // pass no matter what. Re-checking the same rule with a plausible value is
     // what actually proves the checker responds to the value.
     const control = checkBudgets(loadBudgets(), [
-      { id: budgetId, value: 25, throttleRatio: throttle.observedRatio },
+      { id: budgetId, value: 25, throttle: [throttle.probe] },
     ]);
     expect(control.results.find((r) => r.rule.id === budgetId)?.status).toBe('passed');
   });

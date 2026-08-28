@@ -1,5 +1,11 @@
 import type { Page } from '@playwright/test';
-import { CPU_BENCH_ITERATIONS, cpuBenchmark } from '@imagi3/audit';
+import {
+  CPU_BENCH_ITERATIONS,
+  THROTTLE_BENCHMARK_ID,
+  cpuBenchmark,
+  probeRatio,
+  type ThrottleProbe,
+} from '@imagi3/audit';
 
 /**
  * Run the fixed arithmetic benchmark inside a page and return the wall time.
@@ -77,22 +83,16 @@ export async function applyCpuThrottling(page: Page, rate: number): Promise<void
 export const THROTTLE_VERIFY_ITERATIONS = 80_000_000;
 
 /**
- * Samples per side of the verification.
+ * Paired samples per probe.
  *
- * The minimum is taken, not the mean: contention between parallel Playwright
- * workers can only ever make a run slower, so the fastest sample is the best
- * estimate of the true speed. A mean would let a neighbouring worker's load
- * inflate the unthrottled baseline and collapse the apparent ratio.
+ * Each pair is one control run with throttling off and one with it on, taken
+ * back to back on the same page, so contention lasting longer than a pair
+ * divides out of the ratio. Three pairs, fixed — deliberately not a loop that
+ * resamples until the number is acceptable. Sampling until a threshold is met
+ * is a way of manufacturing a passing result, and this file exists because a
+ * measurement was once trusted that had not been earned.
  */
-export const THROTTLE_VERIFY_SAMPLES = 2;
-
-async function fastestBenchmark(page: Page, iterations: number): Promise<number> {
-  let fastest = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < THROTTLE_VERIFY_SAMPLES; i += 1) {
-    fastest = Math.min(fastest, await timeCpuBenchmark(page, iterations));
-  }
-  return fastest;
-}
+export const THROTTLE_PROBE_PAIRS = 3;
 
 /**
  * How much of the requested slowdown must actually materialise.
@@ -106,22 +106,18 @@ async function fastestBenchmark(page: Page, iterations: number): Promise<number>
  * Parallel Playwright workers saturating the host depress the observed ratio —
  * a requested 6x has been seen as 4.5x with three projects running at once — so
  * a fraction close to 1 would fail honest runs.
+ *
+ * This is the harness failing fast on its own page. It is not the gate: the
+ * budget gate re-derives the ratio from the probe below and applies its own
+ * floor, derived from the budget ceilings rather than from the requested rate.
  */
 export const MIN_VERIFIED_RATIO_FRACTION = 0.4;
 
-/**
- * Attempts before declaring throttling absent.
- *
- * Contention is transient and missing throttling is not, so a retry separates
- * them without weakening the check: an unthrottled page reads 1.0x on every
- * attempt.
- */
-export const MAX_VERIFY_ATTEMPTS = 3;
-
 export interface ThrottleVerification {
   readonly requestedRate: number;
-  readonly unthrottledMs: number;
-  readonly throttledMs: number;
+  /** Raw evidence, carried into the measurement artifact for the gate to judge. */
+  readonly probe: ThrottleProbe;
+  /** Convenience view of {@link probe}, computed by the gate's own estimator. */
   readonly observedRatio: number;
   /** Unthrottled milliseconds per iteration on this host, for sizing workloads. */
   readonly msPerIteration: number;
@@ -138,45 +134,46 @@ export interface ThrottleVerification {
  * different page. See RC-0006.
  *
  * So the rate is not merely requested, it is measured: the same workload runs
- * before and after, on the page that will be measured, and a slowdown that
- * never arrives throws instead of quietly producing a good result.
+ * with throttling off and on, alternating, on the page that will be measured.
+ * The raw durations travel with the measurement; this function's own verdict is
+ * a fail-fast convenience, and the authority on whether the samples evidence
+ * anything is the budget gate, in another package and another process.
+ *
+ * The page is left throttled at `requestedRate`, which is what callers depend
+ * on — the last thing the loop does is a throttled sample.
  */
 export async function applyVerifiedCpuThrottling(
   page: Page,
   requestedRate: number,
 ): Promise<ThrottleVerification> {
-  const unthrottledMs = await fastestBenchmark(page, THROTTLE_VERIFY_ITERATIONS);
-  await applyCpuThrottling(page, requestedRate);
+  assertValidThrottlingRate(requestedRate);
+  const controlMs: number[] = [];
+  const throttledMs: number[] = [];
 
-  if (requestedRate === 1) {
-    return {
-      requestedRate,
-      unthrottledMs,
-      throttledMs: unthrottledMs,
-      observedRatio: 1,
-      msPerIteration: unthrottledMs / THROTTLE_VERIFY_ITERATIONS,
-    };
+  for (let pair = 0; pair < THROTTLE_PROBE_PAIRS; pair += 1) {
+    await applyCpuThrottling(page, 1);
+    controlMs.push(await timeCpuBenchmark(page, THROTTLE_VERIFY_ITERATIONS));
+    await applyCpuThrottling(page, requestedRate);
+    throttledMs.push(await timeCpuBenchmark(page, THROTTLE_VERIFY_ITERATIONS));
   }
 
+  const probe: ThrottleProbe = {
+    benchmarkId: THROTTLE_BENCHMARK_ID,
+    iterations: THROTTLE_VERIFY_ITERATIONS,
+    checksum: cpuBenchmark(THROTTLE_VERIFY_ITERATIONS),
+    requestedRate,
+    controlMs,
+    throttledMs,
+  };
+
+  const observedRatio = probeRatio(probe);
   const required = requestedRate * MIN_VERIFIED_RATIO_FRACTION;
-  let bestRatio = 0;
-  let throttledMs = Number.NaN;
-
-  for (let attempt = 0; attempt < MAX_VERIFY_ATTEMPTS; attempt += 1) {
-    const sample = await fastestBenchmark(page, THROTTLE_VERIFY_ITERATIONS);
-    const ratio = sample / unthrottledMs;
-    if (ratio > bestRatio) {
-      bestRatio = ratio;
-      throttledMs = sample;
-    }
-    if (bestRatio >= required) break;
-  }
-
-  if (bestRatio < required) {
+  if (!(observedRatio >= required)) {
     throw new Error(
       `CPU throttling did not take effect on this page: requested ${String(requestedRate)}x, ` +
-        `best of ${String(MAX_VERIFY_ATTEMPTS)} attempts was ${bestRatio.toFixed(2)}x ` +
-        `(${unthrottledMs.toFixed(1)}ms unthrottled, ${throttledMs.toFixed(1)}ms throttled), ` +
+        `${String(THROTTLE_PROBE_PAIRS)} paired samples evidence ${observedRatio.toFixed(2)}x ` +
+        `(control ${controlMs.map((ms) => ms.toFixed(0)).join('/')}ms, ` +
+        `throttled ${throttledMs.map((ms) => ms.toFixed(0)).join('/')}ms), ` +
         `below the required ${required.toFixed(2)}x. ` +
         'Any measurement taken on this page would carry no device signal.',
     );
@@ -184,10 +181,9 @@ export async function applyVerifiedCpuThrottling(
 
   return {
     requestedRate,
-    unthrottledMs,
-    throttledMs,
-    observedRatio: bestRatio,
-    msPerIteration: unthrottledMs / THROTTLE_VERIFY_ITERATIONS,
+    probe,
+    observedRatio,
+    msPerIteration: Math.min(...controlMs) / THROTTLE_VERIFY_ITERATIONS,
   };
 }
 

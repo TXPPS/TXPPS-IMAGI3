@@ -26,7 +26,8 @@
     "test:e2e": "playwright test",
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false",
-    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm verify:claims && pnpm test && pnpm build",
+    "verify:claims": "node --experimental-strip-types tools/repo/src/cli/verify-claims.ts"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

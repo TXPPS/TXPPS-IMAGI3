@@ -1,8 +1,12 @@
 import type { Page } from '@playwright/test';
 import { READY_ATTRIBUTE, READY_MARK } from '../../apps/editor/src/constants.ts';
-import { COLD_LOAD_BUDGET_IDS, type PageIncident } from '@imagi3/audit';
+import {
+  COLD_LOAD_BUDGET_IDS,
+  observedThrottleRatio,
+  type PageIncident,
+  type ThrottleProbe,
+} from '@imagi3/audit';
 import { recordMeasurements, ruleFor } from './budget.ts';
-import { median } from '@imagi3/repo';
 import { expect, test, throttlingFor, type OpenThrottledPage } from './fixtures.ts';
 import { installIncidentCapture } from './incidents.ts';
 
@@ -69,8 +73,8 @@ function worst(values: readonly number[]): number {
  */
 interface ColdLoadSample {
   readonly elapsedMs: number;
-  /** Throttling measured on the page this sample came from. */
-  readonly throttleRatio: number;
+  /** Raw throttling evidence from the page this sample came from. */
+  readonly probe: ThrottleProbe;
 }
 
 async function sampleColdLoad(
@@ -92,12 +96,11 @@ async function sampleColdLoad(
     ).toBeDefined();
     expect(verification?.requestedRate).toBe(expectedRate);
 
+    if (verification === undefined) throw new Error('unreachable: asserted defined above');
+
     await fresh.goto('/');
     await expect(fresh.locator(`html[${READY_ATTRIBUTE}="true"]`)).toBeAttached();
-    return {
-      elapsedMs: coldLoadMs(await readTimings(fresh)),
-      throttleRatio: verification?.observedRatio ?? Number.NaN,
-    };
+    return { elapsedMs: coldLoadMs(await readTimings(fresh)), probe: verification.probe };
   } finally {
     incidents.push(...freshIncidents);
   }
@@ -120,23 +123,11 @@ test.describe('cold load', () => {
       samples.push(await sampleColdLoad(openPage, incidents, profile.cpuThrottlingRate));
     }
     const elapsedMs = worst(samples.map((s) => s.elapsedMs));
-    // The median of the per-page ratios.
-    //
-    // Note this is the opposite choice from `worst()` above, deliberately,
-    // because the two quantities are being estimated for different purposes.
-    // The elapsed time feeds a *budget*, where the conservative bound is what
-    // protects against regressions. This ratio is an *estimate of a physical
-    // property* — how much the renderer was actually slowed — and there the
-    // robust central estimate is the honest one.
-    //
-    // It was briefly the maximum, on the argument that every influence on the
-    // estimate depresses it. Review disproved both halves of that: contention
-    // on the throttled draws inflates the ratio, and a page that is never
-    // throttled measured 1.31x rather than the 1.0x the argument assumed. The
-    // minimum is not right either — it is one bad baseline draw away from
-    // reading 1.96x on a genuinely 4x-throttled page, which this host produced.
-    // The median is damaged by neither a lucky draw nor an unlucky one.
-    const throttleRatio = median(samples.map((s) => s.throttleRatio));
+    const probes = samples.map((s) => s.probe);
+    // Reported for the failure message only. The gate computes its own from
+    // the probes below and does not read this or any other number this file
+    // concludes; see tools/audit/src/budgets/throttle.ts.
+    const throttleRatio = observedThrottleRatio(probes);
 
     const budgetId = COLD_LOAD_BUDGET_IDS[profile.id];
     const rule = ruleFor(budgetId);
@@ -150,10 +141,11 @@ test.describe('cold load', () => {
         id: budgetId,
         value: elapsedMs,
         origin: `tests/e2e/cold-load.spec.ts worst of ${String(SAMPLE_COUNT)}`,
-        // A non-finite value serialises to JSON null, which the parser rejects
-        // with a stack trace instead of the designed 'unthrottled' status.
-        // Omitting it lands on that status, which is the intended path.
-        throttleRatio: Number.isFinite(throttleRatio) ? throttleRatio : undefined,
+        // Every raw sample from every page, not a conclusion drawn from them.
+        // The flake evidence has to survive into the artifact: a run that
+        // passed on a median while one page was wildly slower is a fact a
+        // later investigation needs, and an estimator throws it away.
+        throttle: probes,
       },
     ]);
 
