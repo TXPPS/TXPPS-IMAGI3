@@ -1,4 +1,4 @@
-import { checkBudgets, type IncidentKind } from '@imagi3/audit';
+import { COLD_LOAD_BUDGET_IDS, checkBudgets, type IncidentKind } from '@imagi3/audit';
 import {
   PLANTED_CONSOLE_TEXT,
   PLANTED_REJECTION_TEXT,
@@ -58,7 +58,7 @@ test.describe('planted faults', () => {
       return entry.startTime;
     }, READY_MARK);
 
-    const budgetId = `editor.coldLoad.${profile.id}`;
+    const budgetId = COLD_LOAD_BUDGET_IDS[profile.id];
     const report = checkBudgets(loadBudgets(), [{ id: budgetId, value: elapsedMs }]);
     const result = report.results.find((r) => r.rule.id === budgetId);
 

@@ -1,5 +1,6 @@
 import { test as base, expect } from '@playwright/test';
 import { DEVICE_PROFILES, type DeviceProfile, type PageIncident } from '@imagi3/audit';
+import { applyCpuThrottling } from '@imagi3/repo';
 import { describeViolations, installIncidentCapture, judgeIncidents } from './incidents.ts';
 
 interface AuditFixtures {
@@ -26,6 +27,20 @@ export const test = base.extend<AuditFixtures>({
       throw new Error(`Playwright project "${testInfo.project.name}" is not a device profile`);
     }
     await use(profile);
+  },
+
+  /**
+   * Every page in every test carries its profile's CPU throttling.
+   *
+   * Overriding the built-in `page` fixture rather than throttling per-test is
+   * deliberate: a per-test opt-in is a per-test opportunity to forget, and a
+   * profile named for a phone that quietly runs at desktop speed measures
+   * nothing. Fresh pages opened inside a test must call
+   * `applyCpuThrottling` themselves — CDP throttling is per-page.
+   */
+  page: async ({ page, profile }, use) => {
+    await applyCpuThrottling(page, profile.cpuThrottlingRate);
+    await use(page);
   },
 
   incidents: async ({ page, allowIncidents }, use) => {

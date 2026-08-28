@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import { READY_ATTRIBUTE, READY_MARK } from '../../apps/editor/src/constants.ts';
+import { COLD_LOAD_BUDGET_IDS } from '@imagi3/audit';
 import { recordMeasurements, ruleFor } from './budget.ts';
 import { expect, test } from './fixtures.ts';
 import { installIncidentCapture } from './incidents.ts';
@@ -89,7 +90,7 @@ test.describe('cold load', () => {
     }
     const elapsedMs = worst(samples);
 
-    const budgetId = `editor.coldLoad.${profile.id}`;
+    const budgetId = COLD_LOAD_BUDGET_IDS[profile.id];
     const rule = ruleFor(budgetId);
     const ceiling = rule.max;
     if (ceiling === undefined) {

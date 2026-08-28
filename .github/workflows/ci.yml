@@ -84,6 +84,12 @@ jobs:
       - name: End-to-end suite
         run: pnpm test:e2e
 
+      # Verifies CPU throttling is actually in effect before any budget named
+      # for a device is believed. Remove the throttling and every ratio
+      # collapses to 1.00x and this step fails.
+      - name: Profile ordering
+        run: pnpm audit:profile-ordering
+
       - name: Performance budgets
         run: pnpm audit:budgets
 
