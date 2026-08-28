@@ -2,18 +2,18 @@
   "currentPhase": "P0",
   "rules": [
     {
-      "id": "editor.coldLoad.desktop",
-      "description": "Editor cold load to interactive on a warm HTTP cache, desktop profile.",
+      "id": "ci-headless.editor.coldLoad",
+      "description": "Editor cold load to interactive on a warm cache, measured on an unthrottled CI/headless runner at desktop viewport. Carries NO device signal: it is the runner, not a desktop. The brief's 3s desktop ceiling is applied to it as an upper bound, but the real desktop claim is DEVICE-VERIFIED and deferred.",
       "unit": "ms",
       "scope": "desktop",
       "max": 3000,
       "min": 1,
       "enforcedFrom": "P0",
-      "source": "brief-4-performance"
+      "source": "brief-4-performance via adr-0011"
     },
     {
       "id": "editor.coldLoad.tablet",
-      "description": "Editor cold load to interactive on a warm HTTP cache, tablet profile.",
+      "description": "Editor cold load to interactive on a warm cache, tablet profile under 4x CPU throttling (measured 4.1x-4.8x). Throttled emulation, not tablet hardware.",
       "unit": "ms",
       "scope": "tablet",
       "max": 6000,
@@ -23,7 +23,7 @@
     },
     {
       "id": "editor.coldLoad.phone",
-      "description": "Editor cold load to interactive, phone profile. Brief fixes desktop and tablet only; phone inherits the tablet ceiling (see ADR-0006).",
+      "description": "Editor cold load to interactive on a warm cache, phone profile under 6x CPU throttling (measured 6.5x-6.8x). Throttled emulation, not phone hardware.",
       "unit": "ms",
       "scope": "phone",
       "max": 6000,
