@@ -33,6 +33,34 @@ pre-release, so versions are phase milestones rather than semantic versions.
 - Continuity documentation: STATE, RESUME, ARCHITECTURE, DECISIONS, BUDGETS,
   BUGS, GAPS, GATES.
 
+**Changed after independent role review**
+
+Three role reviewers (QA Automation, Visual QA, Performance) raised 18 blocking
+findings against the first implementation. All were fixed in code. The ones
+worth knowing about:
+
+- The screenshot comparator gained a third gate. Mean SSIM alone diluted a
+  deleted control to 0.9977 — it caught 3 of 21 planted regressions — because a
+  1440x900 frame averages over roughly 80,000 windows. It now also gates on the
+  fraction of windows below a severe-damage floor, and each of the three gates
+  has a self-test scenario in which it is the only one that fires.
+- The self-test previously could not tell whether either comparator threshold
+  worked: both of its scenarios breached both gates, so deleting either left the
+  suite green. Verified by mutation that this is no longer true.
+- Byte budgets moved from binary to decimal units. They had been silently 4.9%
+  more lenient than the brief states.
+- Cold load is now the later of the readiness mark and first contentful paint,
+  taken as a median of three fresh-page loads. The bare mark is self-reported
+  and fires before paint, so work deferred past it was invisible.
+- Budgets gained plausibility floors: a harness bug reporting zero or a
+  negative value used to score a perfect pass.
+- `editor.bundle.gzip` moved from P3 to P0 with a real measurement harness; it
+  was measurable from a build artifact all along.
+- A missing screenshot baseline is now a failure instead of a silently created
+  file, and the visual suite gained a browser-level negative control.
+- Two assertions that could never fail were removed or replaced.
+- `user-scalable=no` was removed from the viewport meta (WCAG 1.4.4).
+
 **Known limitations**
 
 - Screenshot baselines are not yet locked; that is the P3 gate. See GAP-003.

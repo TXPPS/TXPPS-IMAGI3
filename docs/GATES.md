@@ -27,6 +27,11 @@ failure.
 | All three device profiles boot          | `pnpm test:e2e` — 42 tests, 14 per profile, including shell render, readiness signal, no-overflow layout and manifest fetch                                                                                             | PASS                 |
 | Audit harness catches a planted failure | `pnpm audit:selftest` — 38 assertions over 8 detectors, each planting a defect and asserting the clean counterpart stays green; plus `tests/e2e/planted-fault.spec.ts` driving four faults through the real running app | PASS                 |
 
+The first CI run on this branch **failed**, on a lint error I introduced by
+committing without re-running lint. That is recorded rather than hidden: it is
+the pipeline demonstrating it blocks a red tree, which is the property the
+criterion is actually about.
+
 ### Full sweep artifact
 
 ```

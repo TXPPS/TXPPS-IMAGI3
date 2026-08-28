@@ -14,7 +14,7 @@ const RGB_MAX = 255;
  * screenshots of the same content on an opaque page; flattening both against a
  * fixed background makes the comparison well-defined.
  */
-export function lumaAt(image: RgbaImage, index: number): number {
+function lumaAt(image: RgbaImage, index: number): number {
   const offset = index * RGBA_CHANNELS;
   const { data } = image;
   const alpha = (data[offset + ALPHA_OFFSET] ?? RGB_MAX) / RGB_MAX;

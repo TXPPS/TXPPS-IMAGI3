@@ -15,9 +15,6 @@ export const DEV_BASE_URL = `http://127.0.0.1:${String(DEV_PORT)}`;
 
 export const REPO_ROOT = findRepoRoot();
 
-/** Committed reference screenshots, one directory per device profile. */
-export const BASELINE_DIR = join(REPO_ROOT, 'tests/e2e/baselines');
-
 /** Scratch output for failed comparisons; git-ignored. */
 export const VISUAL_OUTPUT_DIR = join(REPO_ROOT, '.audit-out/visual');
 

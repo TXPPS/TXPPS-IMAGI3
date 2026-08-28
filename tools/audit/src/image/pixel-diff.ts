@@ -41,7 +41,7 @@ function readPixel(image: RgbaImage, offset: number): Yiq {
 }
 
 /** Weighted perceptual distance between two pixels, in the same units as {@link MAX_YIQ_DELTA}. */
-export function pixelDelta(a: RgbaImage, b: RgbaImage, index: number): number {
+function pixelDelta(a: RgbaImage, b: RgbaImage, index: number): number {
   const offset = index * RGBA_CHANNELS;
   const pa = readPixel(a, offset);
   const pb = readPixel(b, offset);

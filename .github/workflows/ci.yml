@@ -71,6 +71,16 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Mirrors the ordering of `pnpm sweep`. The bundle budget is enforced from
+      # P0 and is measured from a build artifact, so the build and the bundle
+      # measurement must both happen before the gate runs — otherwise the gate
+      # correctly fails the run for a budget nobody measured.
+      - name: Build
+        run: pnpm build
+
+      - name: Bundle size
+        run: pnpm audit:bundle
+
       - name: End-to-end suite
         run: pnpm test:e2e
 

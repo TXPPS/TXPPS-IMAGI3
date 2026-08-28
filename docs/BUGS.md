@@ -99,3 +99,31 @@ self-test failure.
 to, and "we implemented the mandated threshold" is not evidence the mandate is
 being enforced. The question to ask of any gate is not "is the number right"
 but "construct the regression this gate exists to catch, and watch it fire".
+
+### RC-0004 — CI enforced a budget that CI never measured
+
+**Found:** P0, by CI, on the first run after `editor.bundle.gzip` moved to P0.
+**Severity:** P2 (a red build, correctly red).
+
+`pnpm sweep` runs `build`, then `audit:bundle`, then the E2E suite, then the
+budget gate. The CI workflow ran only the E2E suite and then the gate, because
+it had been written when every enforced budget came from a browser measurement.
+Moving the bundle budget from P3 to P0 added a measurement that no CI step
+produced, and the gate failed the run with `editor.bundle.gzip — enforced from
+P0 but no harness reported a value`.
+
+**Cause:** two pipelines, `sweep` and the CI workflow, encoded the same ordering
+independently, and only one was updated.
+
+**Fix:** the CI job now mirrors `sweep`'s ordering explicitly, with a comment
+saying why the build and bundle steps must precede the gate.
+
+**Worth noting:** nothing here was a defect in the harness. The gate refused to
+report green for a budget nobody measured, which is precisely the behaviour
+ADR-0006 specifies, exercised for the first time in production rather than in a
+fixture. The failure was the system working.
+
+**Prevention (open):** `sweep` and the CI workflow still encode the ordering
+twice. The durable fix is for CI to invoke `pnpm sweep` directly once the suite
+is slow enough to justify the job split differently; recorded here rather than
+done now, because the current split gives faster feedback on static analysis.
