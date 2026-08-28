@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+pnpm-lock.yaml
+test-results/
+playwright-report/
+.audit-out/
+screenshots/
+*.tsbuildinfo

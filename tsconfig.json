@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./tools/audit"
+    },
+    {
+      "path": "./apps/editor"
+    },
+    {
+      "path": "./tests"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.vite/
+test-results/
+playwright-report/
+blob-report/
+.audit-out/
+screenshots/actual/
+screenshots/diff/
+dist-types/
