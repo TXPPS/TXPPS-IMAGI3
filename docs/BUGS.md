@@ -65,3 +65,37 @@ wrong-target build now fails loudly instead of vacuously passing the
 "assert the presence of Y" from the same artifact. This is the same shape as
 the audit harness self-test, which checks both that a detector catches a
 planted defect and that it stays green on the clean counterpart.
+
+### RC-0003 — Mean SSIM diluted a deleted control into a passing score
+
+**Found:** P0, by the Visual QA review of the screenshot comparator.
+**Severity:** P1 (a gate that could not catch the regressions it existed for).
+
+The comparator gated on mean SSIM against the brief's 0.98 threshold. Measured
+against this project's own shell, deleting the status badge entirely scored a
+mean SSIM of **0.9977** — comfortably passing — while the worst 8x8 window
+scored **0.013**. Of 21 planted single-property regressions across three
+profiles, the mandated threshold pair caught **3**. It missed element deletion,
+font-weight change, colour drift and background gamma shift on every profile.
+
+**Cause:** a 1440x900 frame yields roughly 80,000 SSIM windows. Averaging
+divides any localised structural collapse by 80,000. The signal was present in
+the SSIM map and the reduction to a mean discarded it. The threshold was not
+wrong; the statistic was.
+
+**Fix:** the comparator now also gates on the fraction of windows scoring below
+a severe-damage floor. That floor (0.90) is deliberately well below the
+whole-frame threshold (0.98) — with both at 0.98 the mean gate becomes
+unreachable, since a mean under 0.98 implies many windows under 0.98, and one
+gate silently subsumes the other.
+
+**Prevention:** the harness self-test now pins one regression per gate in which
+the other two stay inside their bounds. Deleting any single gate makes exactly
+one scenario start passing. This was verified by mutation: each of the three
+branches was replaced with `if (false)` in turn, and each produced a distinct
+self-test failure.
+
+**Wider lesson:** a threshold is only as good as the statistic it is applied
+to, and "we implemented the mandated threshold" is not evidence the mandate is
+being enforced. The question to ask of any gate is not "is the number right"
+but "construct the regression this gate exists to catch, and watch it fire".
