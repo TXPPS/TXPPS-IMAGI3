@@ -3,7 +3,7 @@
 <!-- Rewrite this file after every completed task. Prune aggressively. -->
 
 **Phase:** P0
-**Phase status:** P0 closed. P1-PRE (gate verifiability, blocking) closed. P1 not started.
+**Phase status:** P0 closed. P1-PRE (gate verifiability, blocking) implemented; role sign-off in progress. P1 not started.
 
 <!-- The **Phase:** line above is a machine contract: a test requires it to
      match budgets.json currentPhase, so it must be one of the brief's phase
@@ -14,40 +14,42 @@
 
 ## In flight
 
-Nothing. P0 is closed and signed; P1 has not started.
+P1-PRE role reviews, running in detached worktrees at SHA `26add95`
+(tag `review/p1-pre-1`): Performance and QA Automation. The gate is not closed
+until both sign.
 
 ## Next 3 actions
 
-1. Create `packages/core` with the ECS entity/component storage and the scene
-   schema v1 types (P1).
-2. Implement the canonical serializer (sorted keys, fixed float formatting,
-   `-0` normalised, NaN/Infinity rejected at the schema boundary) plus the
-   round-trip hash property test over randomly generated scene graphs.
-3. Add `packages/runtime` with the fixed-step tick loop, and wire the first
-   three.js renderer path (WebGL2 primary) behind a capability probe.
+1. Land any blocking findings from the P1-PRE reviews, then mark P1-PRE closed
+   in the CI-VERIFIED register.
+2. Create `packages/core`: ECS entity/component storage and the scene schema v1
+   types, following ADR-0012 exactly — opaque generated ids, parent pointer plus
+   fractional-index ordering, components keyed by component id, no derived data
+   in the document, `schemaVersion` plus a migration registry with an identity
+   v1 migration.
+3. Implement the canonical serializer and its round-trip hash property test:
+   sorted keys, fixed float formatting, `-0` normalised, NaN and Infinity
+   rejected at the schema boundary, byte-stable across processes.
+
+Bump `budgets.json` currentPhase to `P1` as part of step 2, and update the
+`**Phase:**` line above to match — a test enforces that they agree. The bump
+turns on `runtime.bundle.gzip` and `playmode.fps.tablet.reference2d`, which will
+then FAIL until a harness reports them. That friction is the mechanism.
 
 ## Blockers
 
 None.
 
-## What the P0 reviews changed
-
-Three independent role reviews raised 18 blocking findings against the first
-implementation, including a self-test that proved neither screenshot threshold
-was load-bearing and a mean-SSIM gate that caught 3 of 21 planted regressions.
-All 18 were fixed in code. docs/GATES.md has the table; RC-0003 in docs/BUGS.md
-has the most instructive one.
-
-The habit worth carrying into P1: for any gate, do not ask whether the
-threshold is right. Construct the regression the gate exists to catch and watch
-it fire — then delete the gate and watch the suite go red.
-
 ## Notes for the next session
 
-- `budgets.json` holds `currentPhase`. Bumping it to `P1` turns on the
-  `runtime.bundle.gzip` and `playmode.fps.tablet.reference2d` budgets, which
-  will then FAIL until a harness reports those measurements. Bump it as part of
-  starting P1, not as an afterthought — that is the mechanism that stops a
-  phase from being declared done on unmeasured claims.
-- Visual baselines are deliberately NOT committed yet. See docs/GAPS.md
-  entry GAP-003; the P3 gate is where they get locked.
+- **The schema is a one-way door and its design is already fixed.** ADR-0012 and
+  ADR-0013 decide the shape and the merge semantics; docs/ARCHITECTURE.md
+  carries the rule a feature author needs. Do not re-litigate it while writing
+  the types — implement it.
+- Cycles in the parent graph are a legitimate merge outcome, not a bug to
+  prevent. They are repaired deterministically at load. The fuzz suite requires
+  this, so build it into the loader rather than bolting it on.
+- Two budgets are deliberately not what they appear to be:
+  `ci-headless.editor.coldLoad` measures a CI runner and says so, and the
+  tablet/phone cold-load budgets measure throttled emulation, not hardware.
+  Both are recorded in the DEVICE-VERIFIED register.

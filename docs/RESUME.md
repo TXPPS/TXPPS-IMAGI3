@@ -40,20 +40,29 @@ docs/               Continuity documents. Start with STATE.md.
 
 ## Commands
 
-| Command                            | What it does                                                                                             |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `pnpm install`                     | Install. Node >= 22, pnpm 10.33.                                                                         |
-| `pnpm verify`                      | format check, lint, typecheck, unit tests, build.                                                        |
-| `pnpm sweep`                       | `verify` then E2E then the budget gate. The full back-to-front sweep; run this before closing any phase. |
-| `pnpm test`                        | All Vitest projects (`audit`, `audit-selftest`, `editor`).                                               |
-| `pnpm audit:selftest`              | Proves the audit harness catches planted failures.                                                       |
-| `pnpm test:e2e`                    | Playwright across desktop, tablet and phone profiles.                                                    |
-| `pnpm audit:budgets`               | Compares collected measurements against `budgets.json`.                                                  |
-| `UPDATE_BASELINES=1 pnpm test:e2e` | Rewrite screenshot baselines instead of comparing.                                                       |
+| Command                             | What it does                                                                                                                                                                    |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm install`                      | Install. Node >= 22, pnpm 10.33.                                                                                                                                                |
+| `pnpm verify`                       | format check, lint, typecheck, unit tests, build.                                                                                                                               |
+| `pnpm sweep`                        | The full back-to-front sweep, in dependency order: clear stale measurements, verify, measure the bundle, E2E, profile ordering, budget gate. Run this before closing any phase. |
+| `pnpm test`                         | All Vitest projects (`audit`, `audit-selftest`, `repo`, `editor`).                                                                                                              |
+| `pnpm audit:selftest`               | Proves the audit harness catches planted failures.                                                                                                                              |
+| `pnpm test:e2e`                     | Playwright across desktop, tablet and phone profiles.                                                                                                                           |
+| `pnpm audit:bundle`                 | Gzips the built editor assets and records the size. Needs `pnpm build` first.                                                                                                   |
+| `pnpm audit:profile-ordering`       | Verifies CPU throttling is in effect: tablet slower than desktop, phone slower than tablet.                                                                                     |
+| `pnpm audit:budgets`                | Compares collected measurements against `budgets.json`.                                                                                                                         |
+| `pnpm calibrate:cpu`                | Sweeps CDP throttling rates against a fixed benchmark and reports achieved slowdown.                                                                                            |
+| `pnpm review:worktree <role> <tag>` | Detached worktree at a tagged commit, for an isolated role review.                                                                                                              |
+| `UPDATE_BASELINES=1 pnpm test:e2e`  | Rewrite screenshot baselines instead of comparing.                                                                                                                              |
 
 `pnpm test:e2e` starts two servers itself: a production preview on 4173 (what
-the gates run against) and a dev server on 5173 (only the planted-fault proof
-uses it, because fault injection exists only in dev builds).
+the gates run against) and a dev server on 5173 (the planted-fault and
+planted-perf proofs use it, because fault injection exists only in dev builds).
+
+**The tablet and phone profiles run under CPU throttling** (4x and 6x, applied
+via CDP in the `page` fixture). `pnpm audit:profile-ordering` asserts on every
+run that the throttling is actually in effect; without it, all three profiles
+measure the same machine and every device-named budget is decorative.
 
 ## How the audit system works
 
