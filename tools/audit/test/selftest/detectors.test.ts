@@ -6,10 +6,11 @@ import { checkBudgets, findOrphanMeasurements } from '../../src/budgets/check.ts
 import { parseBudgetDocument } from '../../src/budgets/load.ts';
 import type { BudgetDocument } from '../../src/budgets/types.ts';
 import { evaluateIncidents } from '../../src/console/allowlist.ts';
+import { isBundleAsset, measureDirectory, totalGzipBytes } from '../../src/bundle/measure.ts';
 import type { ConsoleAllowEntry } from '../../src/console/types.ts';
 import { PARITY_THRESHOLDS, compareImages } from '../../src/image/compare.ts';
 import { readAllMeasurements } from '../../src/measurements.ts';
-import { noiseImage, solidImage, withDifferingPixels } from '../helpers/images.ts';
+import { noiseImage, solidImage, withScatteredShift, withWipedBlock } from '../helpers/images.ts';
 
 /**
  * Phase 0 gate: the audit harness must demonstrably catch a deliberately
@@ -36,7 +37,7 @@ const BUDGET_DOC: BudgetDocument = {
       unit: 'ms',
       scope: 'all',
       max: 100,
-      min: undefined,
+      min: 1,
       enforcedFrom: 'P0',
       source: 'selftest',
     },
@@ -59,6 +60,15 @@ function tempDirWith(filename: string, contents: string): string {
 
 const REFERENCE = noiseImage(120, 120, 4242);
 
+/**
+ * Larger reference used by the comparator scenarios below. Each of those
+ * scenarios is tuned so that exactly ONE of the comparator's three gates
+ * fires. That isolation is the point: with a scenario that trips every gate at
+ * once, deleting any single gate would leave this suite green, and the suite
+ * would be certifying a comparator it never tested.
+ */
+const FRAME = noiseImage(320, 320, 99);
+
 const SCENARIOS: readonly DetectorScenario[] = [
   {
     detector: 'budget checker',
@@ -79,6 +89,18 @@ const SCENARIOS: readonly DetectorScenario[] = [
     planted: () => checkBudgets(BUDGET_DOC, [{ id: 'demo.latency', value: Number.NaN }]).ok,
   },
   {
+    detector: 'budget checker',
+    plantedDefect: 'a physically impossible measurement of zero',
+    clean: () => checkBudgets(BUDGET_DOC, [{ id: 'demo.latency', value: 80 }]).ok,
+    planted: () => checkBudgets(BUDGET_DOC, [{ id: 'demo.latency', value: 0 }]).ok,
+  },
+  {
+    detector: 'budget checker',
+    plantedDefect: 'a negative measurement a broken harness could emit',
+    clean: () => checkBudgets(BUDGET_DOC, [{ id: 'demo.latency', value: 80 }]).ok,
+    planted: () => checkBudgets(BUDGET_DOC, [{ id: 'demo.latency', value: -5000 }]).ok,
+  },
+  {
     detector: 'measurement drift checker',
     plantedDefect: 'a harness reporting an id with no matching budget rule',
     clean: () =>
@@ -87,21 +109,54 @@ const SCENARIOS: readonly DetectorScenario[] = [
   },
   {
     detector: 'budget config validator',
-    plantedDefect: 'a budget file whose ceiling was silently deleted',
+    plantedDefect: 'a budget rule left with no bound at all',
     clean: () => canParse({ currentPhase: 'P0', rules: [BUDGET_DOC.rules[0]] }),
     planted: () =>
-      canParse({ currentPhase: 'P0', rules: [{ ...BUDGET_DOC.rules[0], max: undefined }] }),
+      canParse({
+        currentPhase: 'P0',
+        rules: [{ ...BUDGET_DOC.rules[0], max: undefined, min: undefined }],
+      }),
   },
   {
     detector: 'screenshot comparator',
-    plantedDefect: '2% of pixels changed, above the 0.5% parity ceiling',
-    clean: () => compareImages(REFERENCE, REFERENCE, PARITY_THRESHOLDS).ok,
+    plantedDefect: 'diffuse colour drift over 0.93% of pixels (pixel-ratio gate alone)',
+    // Measured: 0.9307% differing, mean SSIM 0.99777, 0.0000% damaged windows.
+    // Only the differing-pixel ratio can catch this.
+    clean: () => compareImages(FRAME, FRAME, PARITY_THRESHOLDS).ok,
+    planted: () => compareImages(FRAME, withScatteredShift(FRAME, 108, 40), PARITY_THRESHOLDS).ok,
+  },
+  {
+    detector: 'screenshot comparator',
+    plantedDefect: 'a control erased from one region (damaged-window gate alone)',
+    // Measured: 0.2500% differing and mean SSIM 0.99690 — both inside their
+    // bounds — while 0.4006% of windows collapse to SSIM 0.00001. This is the
+    // regression a mean-only SSIM gate dilutes into nothing.
+    clean: () => compareImages(FRAME, FRAME, PARITY_THRESHOLDS).ok,
     planted: () =>
-      compareImages(REFERENCE, withDifferingPixels(REFERENCE, 288), PARITY_THRESHOLDS).ok,
+      compareImages(FRAME, withWipedBlock(FRAME, { x: 40, y: 40 }, 16), PARITY_THRESHOLDS).ok,
   },
   {
     detector: 'screenshot comparator',
-    plantedDefect: 'a structurally unrelated frame with a passable pixel count',
+    plantedDefect: 'a three-level background shift no pixel crosses the threshold for',
+    // Measured: 0.0000% differing pixels, mean SSIM 0.97896. Invisible to the
+    // pixel gate; this is the case ADR-0005 cites to justify owning a
+    // comparator with a structural metric at all.
+    clean: () =>
+      compareImages(
+        solidImage(160, 160, [11, 13, 18, 255]),
+        solidImage(160, 160, [11, 13, 18, 255]),
+        PARITY_THRESHOLDS,
+      ).ok,
+    planted: () =>
+      compareImages(
+        solidImage(160, 160, [11, 13, 18, 255]),
+        solidImage(160, 160, [14, 16, 21, 255]),
+        PARITY_THRESHOLDS,
+      ).ok,
+  },
+  {
+    detector: 'screenshot comparator',
+    plantedDefect: 'a wholly unrelated frame',
     clean: () => compareImages(REFERENCE, REFERENCE, PARITY_THRESHOLDS).ok,
     planted: () =>
       compareImages(solidImage(120, 120, [0, 0, 0, 255]), REFERENCE, PARITY_THRESHOLDS).ok,
@@ -129,6 +184,24 @@ const SCENARIOS: readonly DetectorScenario[] = [
       evaluateIncidents([{ kind: 'unhandled-rejection', text: 'benign notice' }], ALLOWLIST).ok,
   },
   {
+    detector: 'console allowlist validator',
+    plantedDefect: 'an allowlist entry with its justification blanked out',
+    clean: () => canEvaluate([{ ...ALLOWLIST[0]!, pattern: 'x' }]),
+    planted: () => canEvaluate([{ ...ALLOWLIST[0]!, justification: '   ' }]),
+  },
+  {
+    detector: 'console allowlist validator',
+    plantedDefect: 'an allowlist pattern that is not a valid regular expression',
+    clean: () => canEvaluate([{ ...ALLOWLIST[0]!, pattern: 'x' }]),
+    planted: () => canEvaluate([{ ...ALLOWLIST[0]!, pattern: '([' }]),
+  },
+  {
+    detector: 'bundle measurer',
+    plantedDefect: 'a build directory holding only source maps',
+    clean: () => measuresSomething({ 'app.js': 'console.log(1);' }),
+    planted: () => measuresSomething({ 'app.js.map': '{"version":3}' }),
+  },
+  {
     detector: 'measurement file reader',
     plantedDefect: 'a truncated measurement file a harness half-wrote',
     clean: () =>
@@ -144,6 +217,25 @@ function canParse(input: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+function canEvaluate(entries: readonly ConsoleAllowEntry[]): boolean {
+  try {
+    evaluateIncidents([], entries);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when the bundle measurer found at least one asset worth counting. */
+function measuresSomething(files: Record<string, string>): boolean {
+  const dir = mkdtempSync(join(tmpdir(), 'imagi3-selftest-bundle-'));
+  for (const [name, contents] of Object.entries(files)) {
+    writeFileSync(join(dir, name), contents);
+  }
+  const assets = measureDirectory(dir);
+  return assets.length > 0 && totalGzipBytes(assets) > 0;
 }
 
 function canRead(dir: string): boolean {
@@ -170,16 +262,29 @@ describe('audit harness self-test', () => {
     },
   );
 
-  it('covers every detector the phase 0 harness ships', () => {
+  /**
+   * A change detector, and knowingly so: it cannot notice a detector that ships
+   * with no scenario at all. Its job is narrower — to make removing a
+   * scenario, or adding a detector without listing it here, a deliberate edit
+   * to this list rather than a silent omission.
+   */
+  it('lists a scenario for every detector the phase 0 harness ships', () => {
     expect(new Set(SCENARIOS.map((s) => s.detector))).toEqual(
       new Set([
         'budget checker',
         'measurement drift checker',
         'budget config validator',
+        'console allowlist validator',
         'screenshot comparator',
         'console guard',
+        'bundle measurer',
         'measurement file reader',
       ]),
     );
+  });
+
+  it('exercises the bundle measurer on real bytes, not a stub', () => {
+    expect(isBundleAsset('app.js')).toBe(true);
+    expect(isBundleAsset('app.js.map')).toBe(false);
   });
 });

@@ -8,7 +8,6 @@ import {
   PLANTED_CONSOLE_TEXT,
   PLANTED_REJECTION_TEXT,
   PLANTED_THROW_TEXT,
-  SLOW_BOOT_DELAY_MS,
 } from '../src/dev/plant.ts';
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -87,7 +86,10 @@ describe('production bundle', () => {
       expect(code).not.toContain(PLANTED_THROW_TEXT);
       expect(code).not.toContain(PLANTED_REJECTION_TEXT);
       expect(code).not.toContain('applyPlantedFault');
-      expect(code).not.toContain(String(SLOW_BOOT_DELAY_MS));
+      // Deliberately not asserted: the slow-boot delay constant. esbuild
+      // rewrites 9000 to 9e3, so a literal search for "9000" can never fail and
+      // would be decoration in the one test whose purpose is preventing exactly
+      // that. The four assertions above all survive minification.
     },
     BUILD_TIMEOUT_MS,
   );
