@@ -87,12 +87,37 @@ export const THROTTLE_VERIFY_ITERATIONS = 80_000_000;
  *
  * Each pair is one control run with throttling off and one with it on, taken
  * back to back on the same page, so contention lasting longer than a pair
- * divides out of the ratio. Three pairs, fixed — deliberately not a loop that
- * resamples until the number is acceptable. Sampling until a threshold is met
- * is a way of manufacturing a passing result, and this file exists because a
- * measurement was once trusted that had not been earned.
+ * divides out of the ratio. Fixed — deliberately not a loop that resamples
+ * until the number is acceptable. Sampling until a threshold is met is a way of
+ * manufacturing a passing result, and this file exists because a measurement
+ * was once trusted that had not been earned.
+ *
+ * Five rather than three. The estimator discards pairs whose control leg was
+ * itself interfered with, and on the run Performance measured — control legs of
+ * 747ms, 268ms and 232ms — that would have left two. Five pairs means the
+ * discard has something to keep, at the cost of about a second per page.
  */
-export const THROTTLE_PROBE_PAIRS = 3;
+export const THROTTLE_PROBE_PAIRS = 5;
+
+/**
+ * How much slower than the fastest control the *median* control may be before
+ * the run is called contended rather than unthrottled.
+ *
+ * The two diagnoses are different and were reported as one. "CPU throttling did
+ * not take effect" says the harness is broken and the measurement carries no
+ * device signal; "the host is busy" says the measurement could not be taken
+ * now. Performance's run was the second reported as the first, six times across
+ * a suite, which is the kind of failure that teaches people to re-run until
+ * green.
+ */
+export const CONTENDED_MEDIAN_INFLATION = 2;
+
+export class HostContentionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HostContentionError';
+  }
+}
 
 /**
  * How much of the requested slowdown must actually materialise.
@@ -169,12 +194,27 @@ export async function applyVerifiedCpuThrottling(
   const observedRatio = probeRatio(probe);
   const required = requestedRate * MIN_VERIFIED_RATIO_FRACTION;
   if (!(observedRatio >= required)) {
+    const samples =
+      `control ${controlMs.map((ms) => ms.toFixed(0)).join('/')}ms, ` +
+      `throttled ${throttledMs.map((ms) => ms.toFixed(0)).join('/')}ms`;
+    // Two different diagnoses, told apart before either is reported. A control
+    // leg whose median sits far above the run's fastest is a host under load,
+    // not a page that failed to throttle, and calling the second the first is
+    // how a suite comes to be re-run until it is green.
+    const fastest = Math.min(...controlMs);
+    const typical = median(controlMs);
+    if (typical > fastest * CONTENDED_MEDIAN_INFLATION) {
+      throw new HostContentionError(
+        `This host was too busy to measure throttling: the fastest control leg ran in ` +
+          `${fastest.toFixed(0)}ms and the median in ${typical.toFixed(0)}ms (${samples}). ` +
+          'That spread is other work on the machine, not a page that failed to throttle. ' +
+          'Re-run with fewer workers, or on a quieter host.',
+      );
+    }
     throw new Error(
       `CPU throttling did not take effect on this page: requested ${String(requestedRate)}x, ` +
         `${String(THROTTLE_PROBE_PAIRS)} paired samples evidence ${observedRatio.toFixed(2)}x ` +
-        `(control ${controlMs.map((ms) => ms.toFixed(0)).join('/')}ms, ` +
-        `throttled ${throttledMs.map((ms) => ms.toFixed(0)).join('/')}ms), ` +
-        `below the required ${required.toFixed(2)}x. ` +
+        `(${samples}), below the required ${required.toFixed(2)}x. ` +
         'Any measurement taken on this page would carry no device signal.',
     );
   }
@@ -187,10 +227,24 @@ export async function applyVerifiedCpuThrottling(
   };
 }
 
+/**
+ * The median, averaging the two middle values for an even count.
+ *
+ * `sorted[floor(n/2)]` is the *upper* middle, so for two samples it returns the
+ * larger — the maximum. That defect was found and fixed in the audit package's
+ * estimator at the P1 gate, and this second copy still had it at pass 2, which
+ * is the argument for one implementation rather than two. It is reachable now:
+ * {@link THROTTLE_PROBE_PAIRS} is five, but the contended-control filter can
+ * leave an even number of usable samples.
+ */
 export function median(values: readonly number[]): number {
   if (values.length === 0) throw new RangeError('cannot take the median of an empty sample set');
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)] ?? Number.NaN;
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle] ?? Number.NaN;
+  const lower = sorted[middle - 1];
+  const upper = sorted[middle];
+  return lower === undefined || upper === undefined ? Number.NaN : (lower + upper) / 2;
 }
 
 /** Warmup runs discarded before sampling, so JIT tiering is not measured. */

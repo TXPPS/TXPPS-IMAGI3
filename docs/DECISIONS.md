@@ -172,10 +172,31 @@ decision. The stricter reading is taken, and
 `tools/audit/test/budgets/real-config.test.ts` asserts each byte budget is below
 its binary equivalent so the interpretation cannot drift back.
 
-**Duration and size budgets carry a plausibility floor.** A `max` alone accepts
-zero and negative values, so a harness bug — reading a mark's `duration`, which
-is always zero, instead of its `startTime` — would report a perfect score rather
-than a failure. Every cold-load and bundle rule therefore also declares a `min`.
+**Every budget with a ceiling carries a floor.** A `max` alone accepts zero and
+negative values, so a harness bug — reading a mark's `duration`, which is always
+zero, instead of its `startTime` — would report a perfect score rather than a
+failure.
+
+The rule is stated by shape, and it was not always. It read "every duration and
+size budget", enforced as `unit === 'ms' || unit === 'bytes'`, which is the same
+hardcoded-list mistake one level up from the one it replaced: Performance found
+`soak.heapGrowth.ratio` at the P1 gate pass 2, a ceiling in a third unit with no
+floor at all, where a harness reporting `0` scored perfectly. "A max alone
+accepts zero" has nothing to do with the unit.
+
+Its floor is **0.1**, and the derivation is that it is not a target. The rule
+measures end-of-soak heap over post-warmup heap, so a working run reports about
+1.0 and a leak reports more. A tenth is the line below which the number is not a
+heap measurement at all: no thirty-minute play-mode run ends with a tenth of the
+memory it warmed up with, and an instrument returning zero — the actual failure
+this guards — is far beneath it. Same shape as the throttle probe's
+`MIN_PLAUSIBLE_MS_PER_ITERATION`: a physical-impossibility line, not a
+calibration, and it constrains only from below.
+
+`min: 0` remains legitimate where zero is a real, reachable result —
+`playmode.droppedFrames.tablet.reference2d` is a correct run when it drops none
+— but it must be a decision rather than an omission, so a rule declaring it has
+to say why in its description, and a test checks that it does.
 
 **Rejected:** enforcing every budget from P0 (would make the tree permanently
 red for metrics that cannot exist yet); silently skipping unmeasured budgets
@@ -655,9 +676,13 @@ submission is inside the boundary. Measured 4.66ms on the throttled tablet
 Stated as a range rather than a claim, because the original claim — "fails when
 that code regresses" — was contradicted by a planted regression:
 
-- **Caught:** anything that roughly doubles the engine's per-frame cost.
-- **Not caught:** a 3x regression confined to simulation, which is 5% of this
-  scene's engine frame cost. A budget on the total cannot see it.
+- **Caught:** anything that roughly doubles the engine's per-frame cost, and
+  anything that doubles draw submission, which is 88% of it.
+- **Not caught:** a regression confined to either small term. Simulation is 6%
+  of this scene's engine frame cost and scene-graph writes are 6%, so a 12x
+  simulation regression passes and a 3x scene-graph regression moves the total
+  22% — inside its own 36% run-to-run spread. Measured at the P1 gate pass 2,
+  not estimated.
 - **Not achievable here:** anything tighter. Run-to-run variance on the
   sub-millisecond components is roughly 2x on this host, so a regression
   detector below that is noise. It needs a quiet runner and is open work at P3.
@@ -673,7 +698,14 @@ Lowering the frame target to what SwiftShader can manage would produce a number
 that passes and means nothing — it would track the rasteriser's performance and
 would not move if the engine got ten times slower at anything that is not
 fragment-bound. Excluding rasterisation instead gives a budget that is entirely
-about code in this repository, and that fails when that code regresses.
+about code in this repository.
+
+It does **not** follow that it "fails when that code regresses", which is what
+this sentence used to claim and what a planted regression falsified. Draw
+submission is 88% of the statistic, so the budget fails when the engine's frame
+roughly doubles and is blind to a regression confined to either small term. The
+bound is stated in full in the derivation below; the point of this paragraph is
+only that the quantity is first-party work rather than the rasteriser's.
 
 The ceiling is **derived**: half of a 16.67ms frame, rounded down to 8ms. The
 other half must cover rasterisation, compositing, browser overhead, and the
@@ -767,16 +799,24 @@ by a substitute; it is discharged by hardware.
 - **Ceiling: 8ms.** Half of 16.67ms, rounded down. The other half must cover
   rasterisation, compositing, browser overhead, and the gameplay a real project
   adds. An engine past half the frame on its own has left no room for the game.
-- **Measured: 4.66ms** on the throttled tablet profile (0.26ms per step, 4.40ms
-  per frame).
-- **Sensitivity: about 1.7x.** It catches a doubling of engine frame cost. It
-  does **not** catch a 3x regression confined to simulation, which is 5% of this
-  scene's cost. Nothing tighter is achievable here: run-to-run variance on the
-  sub-millisecond components is roughly 2x.
-- **Held to that by** four scenarios in the audit self-test, including an
-  inverse control asserting a pure rasteriser change does _not_ move it, and one
-  asserting the simulation-only blind spot rather than leaving it to be
-  rediscovered.
+- **Measured: 4.66ms** on the throttled tablet profile: 0.26ms per simulation
+  step (6%), 0.30ms of scene-graph writes (6%), 4.10ms of draw submission (88%).
+  The split matters more than the total, because it is what decides the next
+  line.
+- **Sensitivity: about 1.7x on the whole frame.** It catches a doubling of
+  engine frame cost, and a doubling of draw submission. It does **not** catch a
+  regression confined to either small term: a 12x simulation regression passes,
+  and a 3x scene-graph regression moves the total 22%, inside the measurement's
+  own 36% run-to-run spread. Nothing tighter is achievable here.
+- **Held to that by** six scenarios in the audit self-test: a whole-frame
+  doubling and a draw-submission doubling that must be caught, the two
+  small-term blind spots asserted as blind spots so a later claim to the
+  contrary fails, an inverse control asserting a pure rasteriser change does
+  _not_ move it, and the frozen-world refusal.
+- **Composition pinned** by `CPU_FRAME_TERMS` and `CPU_FRAME_EXCLUDED` in
+  `tools/audit/src/budgets/frames.ts`, audited field by field. Dropping
+  `presentMs` from the statistic under-reported it by 90% with the entire suite
+  green until pass 2.
 
 ### `playmode.droppedFrames.tablet.reference2d` — derivation
 

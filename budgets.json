@@ -43,7 +43,7 @@
     },
     {
       "id": "playmode.droppedFrames.tablet.reference2d",
-      "description": "Fraction of frames that missed a vsync on the reference 2D scene, tablet profile. The brief's 60fps target, stated as something the instrument can express a pass for.",
+      "description": "Fraction of frames that missed a vsync on the reference 2D scene, tablet profile. The brief's 60fps target, stated as something the instrument can express a pass for. The floor is zero because zero is the ideal here and a reachable one: a run that drops no frames is a correct run, not a broken instrument, and the frozen-world and too-few-frames refusals are what stop a measurement of nothing scoring it.",
       "unit": "ratio",
       "scope": "tablet",
       "max": 0.05,
@@ -58,7 +58,7 @@
       "scope": "tablet",
       "max": 8,
       "enforcedFrom": "P1",
-      "source": "Derived: half of a 16.67ms 60Hz frame, rounded down. The other half must cover rasterisation, compositing and the gameplay a real project adds. Measured at 4.66ms (0.26ms per step + 4.40ms per frame). A shippability bound catching regressions of about 1.7x and larger; run-to-run variance on the sub-millisecond components is roughly 2x on this host, so nothing tighter is achievable here. See ADR-0015 and RC-0011.",
+      "source": "Derived: half of a 16.67ms 60Hz frame, rounded down. The other half must cover rasterisation, compositing and the gameplay a real project adds. Measured at 4.66ms on the throttled tablet: 0.26ms per simulation step (6%), 0.30ms of scene-graph writes (6%), 4.10ms of draw submission (88%). A shippability bound catching a doubling of the whole frame, or of draw submission; it does not see a regression confined to either small term, where a 12x simulation regression passes and a 3x scene-graph regression moves the total 22%. Run-to-run variance is roughly 2x on this host, so nothing tighter is achievable here. See ADR-0015 and RC-0011.",
       "min": 0.01
     },
     {
@@ -102,9 +102,10 @@
     },
     {
       "id": "soak.heapGrowth.ratio",
-      "description": "Ratio of end-of-soak heap to post-warmup heap over a 30 minute play-mode run. Above 1.0 by more than the slack indicates a leak.",
+      "description": "Ratio of end-of-soak heap to post-warmup heap over a 30 minute play-mode run. Above 1.0 by more than the slack indicates a leak. The floor is a plausibility line, not a target: a run whose heap ended at a tenth of its post-warmup size did not measure a heap.",
       "unit": "ratio",
       "scope": "all",
+      "min": 0.1,
       "max": 1.1,
       "enforcedFrom": "P3",
       "source": "brief-4-stress"

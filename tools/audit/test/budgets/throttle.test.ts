@@ -4,6 +4,7 @@ import {
   MIN_PLAUSIBLE_MS_PER_ITERATION,
   MIN_PROBE_ITERATIONS,
   THROTTLE_BENCHMARK_ID,
+  cleanPairs,
   firstProbeFault,
   observedThrottleRatio,
   probeFault,
@@ -54,6 +55,58 @@ describe('probeRatio', () => {
 
   it('refuses an empty probe', () => {
     expect(probeRatio({ ...probe(1), controlMs: [], throttledMs: [] })).toBeNaN();
+  });
+});
+
+/**
+ * Contention inside a pair, which pairing does not remove.
+ *
+ * Dividing back-to-back samples cancels load that lasts across both legs. It
+ * does nothing for load that arrives during one — and that is the ordinary case
+ * here, because the throttled leg is dominated by mandated sleep and absorbs
+ * extra CPU pressure far better than the control leg does. Running this
+ * repository's own three-reviewer procedure puts three browser suites on four
+ * cores, and Performance measured control legs of 747ms, 268ms and 232ms
+ * against an uncontended ~100ms. The ratio collapsed and the harness reported
+ * that CPU throttling had not taken effect, which was false: throttling was
+ * working and the host was busy.
+ */
+describe('cleanPairs', () => {
+  it('keeps every pair on a quiet host', () => {
+    const quiet = { ...probe(4), controlMs: [100, 102, 98], throttledMs: [400, 408, 392] };
+    expect(cleanPairs(quiet)).toEqual([0, 1, 2]);
+  });
+
+  it('drops a pair whose control leg was interfered with', () => {
+    const busy = { ...probe(4), controlMs: [747, 268, 232], throttledMs: [1060, 1072, 928] };
+    // 232 is the best estimate of the uncontended time; 747 is 3.2x that.
+    expect(cleanPairs(busy)).toEqual([1, 2]);
+  });
+
+  it('recovers the real slowdown from a run the old estimator failed', () => {
+    // Performance's measured numbers. Pooled over all three pairs the median
+    // ratio is 4.00; over the uncontended pairs it is 4.00 as well here, but
+    // the first pair alone reads 1.42x and dragged the run under the bar.
+    const busy = { ...probe(4), controlMs: [747, 268, 232], throttledMs: [1060, 1072, 928] };
+    expect(probeRatio(busy)).toBeCloseTo(4, 1);
+  });
+
+  it('keeps at least one pair however contended, since the fastest defines the reference', () => {
+    const awful = { ...probe(4), controlMs: [900, 800, 700], throttledMs: [1000, 1000, 1000] };
+    expect(cleanPairs(awful).length).toBeGreaterThan(0);
+  });
+
+  it('ignores a non-positive control rather than treating it as fastest', () => {
+    const broken = { ...probe(4), controlMs: [0, 100, 104], throttledMs: [400, 400, 416] };
+    expect(cleanPairs(broken)).toEqual([1, 2]);
+  });
+
+  it('still reads 1.0 when throttling is absent on a contended host', () => {
+    // The property that matters most: contention hits both legs of a pair, so
+    // absent throttling reads 1.0 whatever the load. Filtering must not turn a
+    // missing-throttling run into a passing one.
+    const busy = { ...probe(1), controlMs: [700, 100, 105], throttledMs: [700, 100, 105] };
+    expect(probeRatio(busy)).toBe(1);
   });
 });
 

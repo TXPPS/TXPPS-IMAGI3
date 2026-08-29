@@ -109,16 +109,35 @@ export const FRAME_BUDGET_60HZ_MS = MS_PER_SECOND / TARGET_HZ;
  * point past which the engine has left no room for the game it exists to run,
  * so half is the line.
  *
- * The reference scene models a 1.07ms frame on the throttled tablet profile —
- * 0.27ms per step plus 0.80ms per update — so the engine meets this with about
- * seven times the room, and the ceiling is a line drawn from the frame budget
- * rather than around today's number.
+ * **The measured cost, and what this budget can therefore see.** One number,
+ * because four documents carried four different ones until the P1 gate pass 2
+ * and no two agreed. On the throttled tablet profile the reference scene models
+ * a **4.66ms** frame, made of three terms:
  *
- * **What that headroom means for what this budget catches**, stated so it is
- * not read as more: it is a *shippability* bound, not a regression detector. It
- * fails when the engine can no longer fit in a 60Hz frame at all. A 3x
- * regression stays well inside it. A tighter regression bound needs the noise
- * floor characterised on a quiet CI runner first, and is tracked as RC-0011.
+ * | term                       | ms   | share |
+ * | -------------------------- | ---- | ----- |
+ * | simulation, per step       | 0.26 | 6%    |
+ * | scene-graph write          | 0.30 | 6%    |
+ * | draw submission, `present` | 4.10 | 88%   |
+ *
+ * Against an 8ms ceiling that is 1.7x of headroom, so a regression must roughly
+ * **double the whole frame** before this fails. It is a *shippability* bound,
+ * not a regression detector: it fails when the engine can no longer fit in a
+ * 60Hz frame at all.
+ *
+ * What it cannot see follows from the shares, and is measured rather than
+ * estimated: a 3x increase in the scene-graph write moves the total 22%, inside
+ * the measurement's own 36% run-to-run spread, and a **12x** simulation
+ * regression still passes. Both are recorded as scenarios in the audit
+ * self-test so that a later claim to the contrary fails. A tighter regression
+ * bound needs the noise floor characterised on a quiet runner first, and is
+ * tracked as RC-0011.
+ *
+ * The earlier text here said "1.07ms … about seven times the room … a 3x
+ * regression stays well inside it". Those numbers predate `present()` moving
+ * inside the measured section, which is what took 0.80ms to 4.40ms; the
+ * headroom claim was 4.4x optimistic and the 3x claim had become false in the
+ * other direction, since 3 x 4.66 is 14.0 against a ceiling of 8.
  */
 export const MAX_ENGINE_FRAME_SHARE = 0.5;
 
@@ -175,14 +194,42 @@ function percentile(sorted: readonly number[], fraction: number): number {
 }
 
 /**
- * Longest a frame can take without having missed a vsync at 60Hz.
+ * Longest a frame can take without having missed a vsync.
  *
  * One and a half refresh intervals: a frame that overruns its slot lands on the
  * next one, so anything past 1.5 intervals demonstrably dropped a frame, and
  * anything under it did not — whatever ordinary scheduling jitter did.
  */
 const MISSED_VSYNC_INTERVALS = 1.5;
+
+/** The 60Hz value, kept for reporting and as the leniency ceiling below. */
 export const DROPPED_FRAME_MS = FRAME_BUDGET_60HZ_MS * MISSED_VSYNC_INTERVALS;
+
+/**
+ * The refresh interval a run evidences, inferred from its own frames.
+ *
+ * `DROPPED_FRAME_MS` was a constant derived from 60Hz, and on a 120Hz display
+ * that inverts the check it exists to be. GAP-011 names a ProMotion iPad as a
+ * target device; there the refresh interval is 8.33ms, so a frame must exceed
+ * 25ms — three intervals, a *sustained 30fps* — before the gate counts it as
+ * dropped. A run holding 41fps on that panel, which is half the frames missing,
+ * would report a dropped ratio of exactly zero. That is RC-0012 the other way
+ * up: a budget whose failing condition cannot be reached. Performance found it
+ * at pass 2.
+ *
+ * Nothing exposes the refresh rate to a page portably, so it is measured: the
+ * **fastest** frame in the run is the best available estimate of the interval,
+ * because no frame can beat vsync. A run where every frame is slow would
+ * overestimate it, so the estimate is capped at the 60Hz interval — the result
+ * is never more lenient than the constant it replaces, only stricter on a
+ * faster panel.
+ */
+export function droppedFrameThresholdMs(frameMs: readonly number[]): number {
+  const usable = frameMs.filter((ms) => Number.isFinite(ms) && ms > 0);
+  if (usable.length === 0) return DROPPED_FRAME_MS;
+  const interval = Math.min(Math.min(...usable), FRAME_BUDGET_60HZ_MS);
+  return interval * MISSED_VSYNC_INTERVALS;
+}
 
 export interface DroppedFrameVerdict {
   /** Fraction of frames that missed a vsync, in [0, 1]. */
@@ -221,13 +268,14 @@ export function droppedFrameRatioFrom(samples: FrameSamples): DroppedFrameVerdic
     );
   }
 
-  const dropped = usable.filter((ms) => ms > DROPPED_FRAME_MS);
+  const threshold = droppedFrameThresholdMs(usable);
+  const dropped = usable.filter((ms) => ms > threshold);
   const ordered = sorted(usable);
   return {
     ratio: dropped.length / usable.length,
     detail:
       `${String(dropped.length)} of ${String(usable.length)} frames exceeded ` +
-      `${DROPPED_FRAME_MS.toFixed(2)}ms over ${String(samples.entityCount)} entities; ` +
+      `${threshold.toFixed(2)}ms over ${String(samples.entityCount)} entities; ` +
       `p95 frame ${percentile(ordered, FRAME_PERCENTILE).toFixed(2)}ms, ` +
       `median ${percentile(ordered, MEDIAN).toFixed(2)}ms`,
   };

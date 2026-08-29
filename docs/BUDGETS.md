@@ -108,9 +108,15 @@ that every influence on this quantity depresses it (an unthrottled page measured
 
 **Two checks a scalar could not support.** The gate recomputes the checksum, so
 a probe must know what the workload folds to; and it rejects a control faster
-than `1e-7` ms per iteration, two orders of magnitude below any real host —
-eighty million dependent multiplies in half a millisecond describes hardware
-that does not exist.
+than `1e-7` ms per iteration. For the 80-million-iteration probe that floor is
+**8ms** against a real control of about 100ms — a factor of **12.5**, and it
+describes a 10GHz core retiring the whole dependent chain every cycle.
+
+The arithmetic here previously read "half a millisecond" and "two orders of
+magnitude", both wrong: `1e-7 ms × 80,000,000` is 8ms, so the margin was
+overstated 16x. It also constrains only the control, and only from below, which
+is not the direction a fabricated ratio would be pushed — inflating the
+throttled side is unconstrained by it. It is a sanity check on one number.
 
 **What this still cannot do**, stated so it is not mistaken for more: a harness
 that computes plausible timings without running anything will pass. Nothing in a

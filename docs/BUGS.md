@@ -450,11 +450,23 @@ a host whose rasteriser threads are saturated measures contention as well as
 work. No restructuring of the statistic removes that; only a per-thread CPU
 clock would, and browsers do not expose one.
 
-So the budget is sound as a **shippability bound** — 1.07 ms measured against an
-8 ms ceiling — and its resolution is stated rather than implied: **it cannot
-distinguish a regression smaller than about 30%.** A tighter regression detector
-needs the noise floor characterised on a quiet CI runner first, and is open work
-for P3, alongside RC-0008's harness.
+So the budget is sound as a **shippability bound** — 4.66 ms measured against an
+8 ms ceiling — and its resolution is stated rather than implied: **a regression
+must roughly double the whole engine frame before this fails.**
+
+The numbers in this paragraph were wrong twice and the corrections are worth
+keeping. "1.07 ms" predates `present()` moving inside the measured section,
+which is the fix this very entry records; the sentence kept the pre-fix
+measurement next to the post-fix conclusion. "About 30%" was then wrong by an
+order of magnitude in the other direction: measured at pass 2, a **12x**
+simulation regression passes, a 3x scene-graph regression moves the total 22% —
+inside its own 36% run-to-run spread — and only draw submission, at 88% of the
+statistic, moves it enough to matter. `tools/audit/src/budgets/frames.ts` now
+carries the single table these all restate, and the audit self-test carries a
+scenario for each limit so a later claim to the contrary fails.
+
+A tighter regression detector needs the noise floor characterised on a quiet CI
+runner first, and is open work for P3, alongside RC-0008's harness.
 
 **Wider lesson.** ADR-0015 argued a deferral was legitimate _because_ a
 substitute budget covered what could still be covered. That argument is only as

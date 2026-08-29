@@ -10,6 +10,7 @@ import {
   cpuFrameMsFrom,
   DROPPED_FRAME_MS,
   droppedFrameRatioFrom,
+  droppedFrameThresholdMs,
   frameRateFrom,
   type FrameSamples,
 } from '../../src/budgets/frames.ts';
@@ -257,6 +258,48 @@ describe('cpuFrameMsFrom', () => {
   });
 
   /**
+   * The dropped-frame threshold, inferred from the run rather than from 60Hz.
+   *
+   * A constant derived from 60Hz inverts the check on a faster panel: at 120Hz
+   * a frame must exceed 25ms — three refresh intervals — before it counts as
+   * dropped, so a sustained 41fps on the ProMotion iPad GAP-011 names reports
+   * a ratio of exactly zero. RC-0012 the other way up.
+   */
+  describe('droppedFrameThresholdMs', () => {
+    const run = (interval: number, count = 60): number[] =>
+      Array.from({ length: count }, () => interval);
+
+    it('is 25ms on a 60Hz run, as before', () => {
+      expect(droppedFrameThresholdMs(run(16.7))).toBeCloseTo(DROPPED_FRAME_MS, 5);
+    });
+
+    it('tightens to 12.5ms on a 120Hz run', () => {
+      expect(droppedFrameThresholdMs(run(8.33))).toBeCloseTo(12.5, 1);
+    });
+
+    it('counts half the frames missing at 120Hz, which 25ms calls zero', () => {
+      // Alternating 8.33ms and 16.7ms is 90fps on a 120Hz panel: every other
+      // frame missed its slot. Against the old constant, none of them did.
+      const alternating = Array.from({ length: 60 }, (_, i) => (i % 2 === 0 ? 8.33 : 16.7));
+      const threshold = droppedFrameThresholdMs(alternating);
+      expect(alternating.filter((ms) => ms > threshold)).toHaveLength(30);
+      expect(alternating.filter((ms) => ms > DROPPED_FRAME_MS)).toHaveLength(0);
+    });
+
+    it('is never more lenient than the 60Hz constant', () => {
+      // A run where every frame is slow would overestimate the interval, so the
+      // estimate is capped. The replacement can only be stricter.
+      expect(droppedFrameThresholdMs(run(100))).toBeLessThanOrEqual(DROPPED_FRAME_MS);
+      expect(droppedFrameThresholdMs(run(1000))).toBeCloseTo(DROPPED_FRAME_MS, 5);
+    });
+
+    it('falls back to the constant when there is nothing to infer from', () => {
+      expect(droppedFrameThresholdMs([])).toBe(DROPPED_FRAME_MS);
+      expect(droppedFrameThresholdMs([0, -1, Number.NaN])).toBe(DROPPED_FRAME_MS);
+    });
+  });
+
+  /**
    * The reduction itself, pinned. Every previous case here used a uniform tail,
    * so minimum, median and 95th percentile were indistinguishable and a
    * mutation returning the fastest frame survived the whole suite. The tails
@@ -383,15 +426,43 @@ describe('the budget derivation', () => {
  * could never have passed, on any hardware, and the manual procedure written to
  * close it on a real device would have failed on a flawless one.
  *
- * The positive control is therefore the important test here: a budget with no
- * run that passes it is not a budget.
+ * **The empty page is a reference measurement, not an executable control**, and
+ * the earlier claim that it was the control is corrected here. It cannot be run
+ * through `droppedFrameRatioFrom` at all: an empty page runs no simulation
+ * steps, and the frozen-world refusal rejects it before any ratio is computed.
+ * The executable positive control is the play-mode run in
+ * `tests/e2e/playmode.spec.ts`, which is a real run that satisfies the budget.
+ *
+ * The empty page also does not score zero. Performance measured **0.23% to
+ * 0.34%** dropped on it at pass 2, against a hardcoded fixture here that
+ * asserted none — a fixture written to represent a measurement, disagreeing
+ * with the measurement. The numbers below are the measured ones.
  */
 describe('droppedFrameRatioFrom', () => {
   const vsync = 1000 / 60;
+  /** The enforced ceiling, from `budgets.json`. */
+  const CEILING = 0.05;
+
+  it('scores an idle page far inside the budget, but not at zero', () => {
+    // 1 frame in 300 over the threshold is 0.33%, the middle of the range
+    // Performance measured on a page with no engine in it at all.
+    const idle = samples({
+      frameMs: withTail(vsync, [
+        ...Array.from({ length: 299 }, (_, i) => 16.3 + (i % 9) * 0.1),
+        40,
+      ]),
+      steps: 300,
+      stepsPerFrame: Array.from({ length: WARMUP_FRAMES + 300 }, () => 1),
+      simMs: Array.from({ length: WARMUP_FRAMES + 300 }, () => 1),
+      updateMs: Array.from({ length: WARMUP_FRAMES + 300 }, () => 1),
+      presentMs: Array.from({ length: WARMUP_FRAMES + 300 }, () => 0),
+    });
+    const { ratio } = droppedFrameRatioFrom(idle);
+    expect(ratio).toBeGreaterThan(0);
+    expect(ratio).toBeLessThan(CEILING);
+  });
 
   it('reports no dropped frames for a page locked to its refresh rate', () => {
-    // The empty-page figures Performance measured: 16.30 to 17.10ms, all of
-    // which are on time. This is the positive control the old statistic lacked.
     const onTime = samples({
       frameMs: withTail(
         vsync,

@@ -374,10 +374,11 @@ against an 8ms ceiling. That is a real budget on code in this repository. It is
 not a frame-rate claim and must never be reported as one.
 
 **Its sensitivity is bounded and stated**: it catches roughly a doubling of the
-engine's per-frame cost, and cannot see a 3x regression confined to simulation,
-which is 5% of this scene's engine frame cost. Nothing tighter is achievable on
-this host, where run-to-run variance on the sub-millisecond components is about
-2x. See RC-0011.
+engine's per-frame cost, and of draw submission, which is 88% of it. It cannot
+see a regression confined to either small term — simulation and scene-graph
+writes are 6% each, so a 12x simulation regression passes and a 3x scene-graph
+regression moves the total 22%, inside the measurement's own 36% run-to-run
+spread. Nothing tighter is achievable on this host. See RC-0011.
 
 **Manual procedure (required before claiming DV-007):**
 
@@ -399,7 +400,10 @@ this host, where run-to-run variance on the sub-millisecond components is about
 4. Repeat on a mid-range Android tablet in Chrome, and on an iPhone for the
    phone profile.
 5. Record the numbers, the devices and the OS versions in docs/BUDGETS.md, and
-   move `playmode.fps.tablet.reference2d` back to `enforcedFrom: P1`.
+   move `playmode.droppedFrames.tablet.reference2d` to `enforcedFrom: P1`. (It
+   is the rule that replaced `playmode.fps.tablet.reference2d`, which this step
+   still named after RC-0012 removed it — a procedure referring to a budget that
+   does not exist would have failed at the moment someone tried to follow it.)
 
 **What would invalidate the deferral rather than close it**, in either
 direction:

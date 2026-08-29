@@ -130,14 +130,32 @@ describe('the committed budgets.json', () => {
    *
    * Derived from the document now, so a rule cannot be added without one.
    */
-  it('gives every duration and size budget a plausibility floor', () => {
-    const needFloors = document.rules.filter((r) => r.unit === 'ms' || r.unit === 'bytes');
-    expect(needFloors.length, 'no duration or size budgets were examined').toBeGreaterThan(4);
-    for (const budgetRule of needFloors) {
+  it('gives every ceiling budget a floor, whatever it measures', () => {
+    // Generalised by *shape*, not by unit. The previous version selected
+    // `unit === 'ms' || unit === 'bytes'`, which is the same hardcoded-list
+    // mistake one level up: `soak.heapGrowth.ratio` is a ceiling in a third
+    // unit, and a harness reporting 0 for it scored perfectly. Performance
+    // found it at pass 2. The property is "a max alone accepts zero", and that
+    // has nothing to do with the unit.
+    const ceilings = document.rules.filter((r) => r.max !== undefined);
+    expect(ceilings.length, 'no ceiling budgets were examined').toBeGreaterThan(4);
+    for (const budgetRule of ceilings) {
       expect(
         budgetRule.min,
         `${budgetRule.id} has no floor, so a harness measuring nothing would score perfectly`,
-      ).toBeGreaterThan(0);
+      ).toBeDefined();
+    }
+  });
+
+  it('makes a floor of zero a stated decision rather than an omission', () => {
+    // `min: 0` is legitimate where zero is a real result — no dropped frames is
+    // the ideal, not a broken instrument. It is only legitimate when someone
+    // decided it, so the rule has to say why.
+    for (const budgetRule of document.rules.filter((r) => r.min === 0)) {
+      expect(
+        budgetRule.description.toLowerCase(),
+        `${budgetRule.id} has a floor of zero and does not say why zero is a real measurement`,
+      ).toContain('zero');
     }
   });
 

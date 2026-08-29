@@ -33,6 +33,19 @@ describe('median', () => {
     expect(median([1, 2, 300])).toBe(2);
   });
 
+  it('averages the two middle values for an even count', () => {
+    // `sorted[floor(n/2)]` is the upper middle, so this returned 2 — the
+    // maximum — for a two-sample set. Fixed once in the audit package's
+    // estimator at the P1 gate and still present in this second copy at pass 2,
+    // which is the argument against having two.
+    expect(median([1, 2])).toBe(1.5);
+    expect(median([10, 1, 5, 4])).toBe(4.5);
+  });
+
+  it('is not the upper middle', () => {
+    expect(median([1, 100])).not.toBe(100);
+  });
+
   it('does not mutate its input', () => {
     const values = [3, 1, 2];
     median(values);
