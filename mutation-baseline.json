@@ -1,0 +1,17 @@
+{
+  "packages": {
+    "packages/core": {
+      "enumerated": 245,
+      "killed": 191
+    },
+    "packages/runtime": {
+      "enumerated": 73,
+      "killed": 62
+    },
+    "packages/render": {
+      "enumerated": 72,
+      "killed": 44
+    }
+  },
+  "recordedAt": "pnpm mutants --record, 2026-08-29T11:40:22.820Z"
+}

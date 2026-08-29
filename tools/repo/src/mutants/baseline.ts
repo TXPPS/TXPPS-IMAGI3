@@ -20,6 +20,31 @@
  * whose behaviour genuinely is not observable, an inverse control — and
  * demanding 100% would produce assertions written to satisfy the ratchet rather
  * than to catch anything. What the ratchet forbids is *going backwards*.
+ *
+ * ## The recorded number is not a coverage figure
+ *
+ * Stated here because it would otherwise be read as one, and this project has
+ * spent two gate passes on numbers that read as measurements and were not. The
+ * first baseline is 297 killed of 390 enumerated, and the 93 survivors are three
+ * different things in one total:
+ *
+ * 1. **Files this sweep does not run the suite for.** Every mutant in
+ *    `render/src/view.ts` and `render/src/webgpu.ts` survives — 28 of them —
+ *    because a `SceneView` needs WebGL and its coverage lives in Playwright,
+ *    which `pnpm mutants` does not invoke. `render.present.noop` is genuinely
+ *    covered, and the hand-picked e2e sweep proves it. Counting these as
+ *    uncovered attributes to coverage what is really suite selection.
+ * 2. **Equivalent mutants.** `canonical.ts`'s four surviving inverted predicates
+ *    are the branches of `describe()`, which choose the *noun in an error
+ *    message*. Inverting one changes "a function" to "a symbol" and nothing
+ *    else; the thrown `CanonicalError` and its path are unchanged. A test
+ *    pinning that wording would be a test written for the ratchet.
+ * 3. **Real holes**, which is what the number is for.
+ *
+ * The ratchet works regardless, because it compares like with like: the same
+ * enumeration over the same suites, so a new export landing unguarded lowers the
+ * ratio and fails. It is the **absolute** figure that must not be quoted as
+ * coverage, and separating the three is open work rather than done work.
  */
 
 export interface PackageCoverage {
