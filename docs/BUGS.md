@@ -363,12 +363,15 @@ the finding.
 
 Two headers in `packages/render` made checkable claims that were false.
 
-`parity.ts` said: _"The comparison itself is real and runs today: two WebGL2
-renders of the same scene are compared with the same comparator and thresholds
-the WebGPU leg will use... it is wired, exercised and known to work."_ Nothing
-called `judgeParity` outside its own unit test. The module and the comparator
-had never met. `docs/GAPS.md` GAP-002 then instructed a future engineer to run
-`pnpm test:e2e --grep parity`, which matched zero tests.
+`parity.ts` said:
+
+> The comparison itself is real and runs today: two WebGL2 renders of the same
+> scene are compared with the same comparator and thresholds the WebGPU leg
+> will use... it is wired, exercised and known to work.
+
+Nothing called `judgeParity` outside its own unit test. The module and the
+comparator had never met. `docs/GAPS.md` GAP-002 then instructed a future
+engineer to run `pnpm test:e2e --grep parity`, which matched zero tests.
 
 `webgpu.ts` said the leg was _"wired"_ and that _"the import happens, the
 renderer is constructed, and its asynchronous initialisation is awaited"_, and
@@ -389,9 +392,17 @@ path is unimplemented, and the parity harness has a real caller
 GAP-002 and DV-001 now record that two things block WebGPU parity — missing
 hardware _and_ missing code — rather than only the first.
 
-**The check that would have caught both, and is now the habit:** before writing
-that something is wired, grep for its callers. Before writing that something is
-in the bundle, grep the emitted chunks. Both are one command.
+**The check that would have caught both, now mechanical rather than a habit.**
+`pnpm verify:assertions` fails the build for a comment that claims a runtime
+property without naming a spec path, a test, or a CI job, and for a reference
+naming something that does not exist. It found a live one on its first run: the
+corrected `parity.ts` header cited `tests/e2e/parity.spec.ts`, a file that has
+never existed — RC-0010 recurring inside the fix for RC-0010, which is the whole
+argument for checking references with a program instead of with care.
+
+It does not check that the named test proves the claim. That is still review's
+job; what changed is that review now looks at six sentences rather than at every
+comment in the tree.
 
 ---
 
@@ -536,3 +547,83 @@ the bug only exists when something _observes_ the container, which was true for
 about twenty minutes before the rotation test existed. The test written to close
 one finding found a second one on its first run, which is the argument for
 writing the test rather than reasoning about the code.
+
+---
+
+## RC-0014 — Two source files edited through shell heredocs, against S2
+
+**Found by:** self-report, then confirmed against the transcript.
+**Severity:** medium. **Status:** rule extended, violations logged.
+
+S2 bans shell-mediated source edits because `sed` and a heredoc cannot report
+that they changed nothing — the mechanism behind RC-0005. The ban was
+implemented as a lint check over committed shell and CI files
+(`tools/repo/src/no-shell-edits.ts`), and that check cannot see how the work is
+actually done. Two edits went through `python3` heredocs anyway:
+
+| Edit                                                       | File                                     | Consequence                                                                              |
+| ---------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Replacing `throttleRatio` with `throttle` in a test        | `tools/audit/test/budgets/check.test.ts` | None observed                                                                            |
+| Reverting a device-pixel-ratio mutation via `git checkout` | `apps/editor/src/playmode/index.ts`      | **An unrelated in-flight change was destroyed** and had to be reconstructed from scratch |
+
+The second is the instructive one. It was not the heredoc that lost the work —
+it was reaching for a whole-file shell operation on a file with uncommitted
+changes in it, which is the same class of move and the same absence of a
+read-back.
+
+**Why the rule did not stop it.** The lint check inspects artifacts, and a
+transcript is not an artifact. There is no mechanical guard here and there
+cannot be one from inside the repository; the rule now says so plainly rather
+than implying the check covers more than it does.
+
+**Rule, extended and stated in `docs/ARCHITECTURE.md`:** no source file is
+edited through any shell-mediated mechanism — heredoc, `sed`, `awk`,
+`python3 -c`, `node -e`, or a whole-file `git checkout` over uncommitted work.
+Edits go through a tool that reads back what it wrote, or through a committed
+script that can be reviewed. **This governs how the work is done, not only what
+is committed.** Shell use for reading, searching and running is unaffected.
+
+**Related:** SEC-0001. A session mode was simultaneously directing that edits be
+made exactly this way, which is context worth having, and is not an excuse — the
+operator instruction was explicit and the precedence rule is now written down.
+
+---
+
+## RC-0015 — Two coverage holes the guard audit could not have found
+
+**Found by:** the first run of `pnpm mutation:sweep`. **Severity:** medium.
+**Status:** both closed, with the missing assertions named and written.
+
+The guard audit reasons outward from detectors that exist. The mutation sweep
+reasons inward from production code, and on its first run found two exports that
+could be neutered with no test noticing.
+
+**`lowestId` losing its sort** (`packages/core/src/graph.ts`). Cycle repair
+breaks each cycle at its lowest entity id, which is the property that makes two
+peers converge. Removing the sort left the whole suite green — because in every
+existing test the walk entered the cycle _at_ a cycle member, and the entry
+point was therefore already the lowest id. The two diverge only when the walk
+enters from outside: a leaf hanging off the cycle is reached first, and the cycle
+array then begins at whichever member the leaf pointed into.
+
+Missing assertion, now written: a four-entity document where `en_a` is a leaf
+parented to `en_d` and the cycle is `en_b → en_c → en_d → en_b`. The walk enters
+at `en_d`; the lowest member is `en_b`. Unsorted, the repair detaches the wrong
+entity.
+
+**Velocity absent from the state hash** (`packages/runtime/src/hash.ts`).
+Dropping `vx` and `vy` from the hashed fields left the determinism suite green.
+Ten thousand ticks compared by a hash blind to velocity would report agreement
+between two runs that had diverged in exactly the quantity that produces the
+next tick's positions.
+
+Missing assertion, now written: `packages/runtime/test/hash.test.ts`, one case
+per field. One test varying everything at once would pass with three of the four
+fields hashed, which is the shape of the hole it exists to close.
+
+**Wider lesson.** Both were in code the guard audit had already looked at and
+signed off, and both were in `packages/core` and `packages/runtime` — the two
+packages three reviewers independently called well-guarded, where QA Automation
+killed 22 of 22 mutations it tried. The mutations it tried were not these. That
+is not a criticism of the review; it is the argument for the sweep being
+exhaustive over exports rather than selective over suspicions.

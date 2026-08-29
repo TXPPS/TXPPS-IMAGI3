@@ -107,7 +107,13 @@ export const CONTROL_SPEED = 40;
 export const DRAG_PER_SECOND = 0.5;
 /** Velocity retained after a bounce. */
 export const RESTITUTION = 0.8;
-/** Random jitter applied per second, so RNG injection is exercised by the sim. */
+/**
+ * Random jitter applied per second.
+ *
+ * Its purpose is to put a seeded draw inside the step, so an ordering mistake
+ * shows up as a hash mismatch rather than as a rounding difference nobody
+ * notices — asserted by `packages/runtime/test/determinism.test.ts`.
+ */
 export const JITTER = 0.25;
 
 type System = (world: World, input: InputFrame, stepSeconds: number) => void;

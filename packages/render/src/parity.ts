@@ -20,11 +20,16 @@ import { RENDER_BACKENDS, type RenderBackend } from './backend.ts';
  * it at the P1 gate by grepping for callers, which is the check the claim
  * should have invited and did not.
  *
- * It is wired now: `tests/e2e/parity.spec.ts` captures the reference scene
- * twice on WebGL2, compares them with `PARITY_THRESHOLDS`, and asserts the
- * report is *not* ok because the WebGPU leg is unmeasured. That test is what
- * makes the sentence above true, and it is the reason `required` defaults to
- * every backend rather than to whatever the caller remembers.
+ * It is wired now, in `tests/e2e/render.spec.ts`: it captures the reference
+ * scene twice on WebGL2, compares them with `PARITY_THRESHOLDS`, and asserts
+ * the report is *not* ok because the WebGPU leg is unmeasured. That test is
+ * what makes the sentence above true, and it is the reason `required` defaults
+ * to every backend rather than to whatever the caller remembers.
+ *
+ * The path in this paragraph was wrong when it was written — it named a spec
+ * that does not exist — and `pnpm verify:assertions` caught it on its first
+ * run. RC-0010 recurring inside the fix for RC-0010 is the argument for
+ * checking references mechanically rather than carefully.
  */
 
 export const PARITY_STATUSES = ['passed', 'violated', 'unmeasured'] as const;

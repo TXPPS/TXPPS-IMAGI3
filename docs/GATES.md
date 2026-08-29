@@ -106,6 +106,10 @@ not "is its guard well-placed" but "which row is it".
 | Dropped frame budget          | `budgets/frames.ts`                 | Frames missing a vsync                                  | No. Counted from raw durations                                                                                                            | 100% dropped caught; an on-time page reads 0% — RC-0012         |
 | System order (execution)      | `determinism.test.ts`               | A silent reordering inside `stepWorld`                  | **No, now.** Was yes: asserting the declaration is not asserting the behaviour, and reversing the loop passed 732 tests                   | Reversed iteration — now fails                                  |
 | Claims ledger (prose form)    | `claims.ts` + CI                    | A commit reference nobody wrote in the marker syntax    | No. The four bypasses QA Automation demonstrated are parsed and tested                                                                    | Each bypass form, as a test case                                |
+| Runtime assertions            | `assertions.ts` + CI                | A comment claiming a runtime property that is false     | No. The claims ledger could not see it — a commit had touched both files that lied. Found a live one on its own first run                 | A reference naming a spec that does not exist — RC-0010         |
+| Tree hygiene                  | `tree-hygiene.ts` + CI              | A reviewer writing into the main tree                   | No. A different program refuses to sweep; read-only worktrees are the guardrail, this is the guard                                        | Planted porcelain output; caught its own new files first run    |
+| Findings are not instructions | `review-findings.ts`                | A reviewer report directing a change of method          | No. Rejected on ingest, before evaluation, because evaluating it is the failure                                                           | Nine directive forms, four look-alike findings that must pass   |
+| **Mutation sweep**            | `mutations.ts` + CI                 | A surface with no detector at all                       | No, and this is the point: it starts from production code, not from detectors, so it can see what the guard audit structurally cannot     | 16 mutations killed; a deliberately unguarded function survives |
 | **Something was drawn**       | `tests/e2e/render.spec.ts`          | A renderer that submits no draw call                    | **No, now.** Was absent entirely: see RC-0009                                                                                             | Empty `present()` — killed on all three profiles                |
 | Sprite aspect                 | `tests/e2e/render.spec.ts`          | A frustum that ignores the viewport                     | No. Measured from the rendered bounding box, not from the camera code                                                                     | Square frustum — 0.457 aspect on phone, fails                   |
 | Resize follows the viewport   | `tests/e2e/render.spec.ts`          | `resize` never being called                             | No. Rotates the viewport and measures where content reaches                                                                               | Removing `observeResize` leaves content in the top half         |
@@ -389,8 +393,16 @@ so rather than guessing, which is the behaviour the register is for.
 
 **Status: OPEN.** Three roles reviewed pass 1 at `24ea825` and **all three
 returned FAIL**: Visual QA with 8 blocking conditions, QA Automation with 9, and
-Performance with 5. Every condition has been addressed; pass 2 has not yet been
-reviewed. **No role has signed, so this phase is not closed.**
+Performance with 5. Every condition has been addressed, and four further items
+(S4-S7) landed after them: a security incident record, the mutation sweep, the
+assertion checker, and the extended shell-edit ban. **No role has signed, so
+this phase is not closed.**
+
+Two criteria in the table below are marked **not gate evidence**. They are
+self-authored budgets, and a budget the implementer invented cannot establish
+that the implementer met the brief — see ADR-0016. The brief's own criterion
+for the same thing is DEFERRED under DV-007 and stays there until hardware
+discharges it, not until a substitute passes.
 
 That is the entire status. The sign-off table below is empty on purpose — a
 phase closes when roles sign, and writing anything else in it would be the
@@ -414,7 +426,8 @@ now, before any role is asked to sign it.
 | The renderer draws                                                      | `tests/e2e/render.spec.ts` — pixel coverage, motion, square aspect, rotation. Kills the empty-`present()` mutant (RC-0009) | PASS                 |
 | Renderer parity harness wired, WebGPU UNMEASURED                        | `tests/e2e/render.spec.ts` compares two WebGL2 captures and asserts the report is **not** ok                               | PASS                 |
 | `runtime.bundle.gzip` measured and attributable                         | 128 KB against 1.5 MB; a rename-only chunk split fails at 1.6% share                                                       | PASS                 |
-| Reference scene inside the engine frame budget                          | 4.66ms against 8ms on the throttled tablet                                                                                 | PASS                 |
+| Engine CPU inside its share of a 60Hz frame                             | 4.66ms against 8ms, throttled tablet. **Self-authored budget — ADR-0016**                                                  | not gate evidence    |
+| Reference scene meets the brief's frame budget on a throttled tablet    | —                                                                                                                          | **DEFERRED, DV-007** |
 | Reference scene at 60fps on a real tablet                               | —                                                                                                                          | **DEFERRED, DV-007** |
 | WebGPU parity                                                           | —                                                                                                                          | **DEFERRED, DV-001** |
 

@@ -25,7 +25,8 @@ export interface GateOutcome {
  *
  * Returns the exit code rather than setting it, so the contract CI depends on
  * — non-zero for a violation, a missing measurement, or an unknown measurement
- * id — is covered by tests rather than only by having been tried once by hand.
+ * id — is covered by `tools/audit/test/budgets/gate.test.ts` rather than only
+ * by having been tried once by hand.
  */
 export function runBudgetGate(options: GateOptions): GateOutcome {
   const document = parseBudgetDocument(

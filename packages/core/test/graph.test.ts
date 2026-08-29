@@ -120,6 +120,35 @@ describe('repairSceneGraph', () => {
     expect(diagnostics[0]).toMatchObject({ cycle: ['en_a', 'en_b', 'en_c', 'en_d'] });
   });
 
+  /**
+   * The cycle is broken at its lowest id, not at whichever member the walk
+   * happened to enter through — and the two are usually the same, which is why
+   * every earlier test here passed with the sort removed. The mutation sweep
+   * found it: `lowestId` returning `cycle[0]` unsorted survived the whole
+   * suite.
+   *
+   * They diverge only when the walk enters the cycle from *outside* it. Here
+   * `en_a` is a leaf hanging off `en_d`, so the walk starts at `en_a` (the
+   * lowest id overall), reaches the cycle at `en_d`, and the cycle array begins
+   * `en_d`. The lowest member is `en_b`. Two peers that disagreed about this
+   * would produce different trees from the same merge.
+   */
+  it('breaks the cycle at its lowest id, not where the walk entered it', () => {
+    const document = scene([
+      entity('en_a', 'en_d'),
+      entity('en_b', 'en_c'),
+      entity('en_c', 'en_d'),
+      entity('en_d', 'en_b'),
+    ]);
+    const { document: repaired, diagnostics } = repairSceneGraph(document);
+
+    expect(diagnostics[0]?.entity).toBe('en_b');
+    expect(repaired.entities['en_b']?.parent).toBeNull();
+    expect(repaired.entities['en_d']?.parent).toBe('en_b');
+    // The leaf is not a cycle member and must keep its parent.
+    expect(repaired.entities['en_a']?.parent).toBe('en_d');
+  });
+
   it('keeps a subtree hanging off a cycle, rooting it through the repair', () => {
     const document = scene([
       entity('en_a', 'en_b'),

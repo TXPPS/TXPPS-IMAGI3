@@ -708,3 +708,96 @@ unthrottled desktop profile only (loses the CPU-throttling signal, which is
 real, in order to escape the GPU problem, which is not the same problem);
 gating on the p95 anyway and accepting flakes (a gate that fails at random
 teaches people to re-run it, which is worse than not having it).
+
+---
+
+## ADR-0016 — Self-authored budgets, and why they are not gate evidence
+
+**Status:** accepted, P1.
+
+### The register
+
+Every budget in `budgets.json` is either **from the brief** or **self-authored**.
+The distinction was implicit and is now recorded, because a budget the
+implementer invented cannot serve as evidence that the implementer met the
+brief — it is a claim about a claim.
+
+| Budget                                          | Origin                                      | Derivation                                                                                         |
+| ----------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `ci-headless.editor.coldLoad`                   | Brief (3s desktop cold load)                | Renamed, not re-derived. ADR-0011: the profile is unthrottled, so the id must not assert a device. |
+| `editor.coldLoad.tablet` / `.phone`             | Brief (6s)                                  | Unchanged.                                                                                         |
+| `editor.bundle.gzip`                            | Brief (5MB)                                 | Unchanged. Now measures the shell only; the runtime chunk is subtracted.                           |
+| `runtime.bundle.gzip`                           | Brief (1.5MB)                               | Unchanged.                                                                                         |
+| `playmode.fps.phone.reference3d`                | Brief (30fps)                               | Unchanged, enforced from P6.                                                                       |
+| `editor.frameSpike.max`                         | Brief (32ms)                                | Unchanged.                                                                                         |
+| `playmode.heap.peak.phone`                      | Brief (500MB)                               | Unchanged.                                                                                         |
+| `gpu.texture.phone`                             | Brief (256MB)                               | Unchanged.                                                                                         |
+| `soak.heapGrowth.ratio`                         | Brief (1.1)                                 | Unchanged.                                                                                         |
+| **`playmode.cpuFrame.tablet.reference2d`**      | **Self-authored**                           | Half a 16.67ms 60Hz frame, rounded down to 8ms. Derivation and limits below.                       |
+| **`playmode.droppedFrames.tablet.reference2d`** | **Restatement** of the brief's 60fps target | Derivation below.                                                                                  |
+
+Two were removed rather than kept: `playmode.cpuFrame.phone.reference2d`, which
+was self-authored, outside the brief, and had 9% headroom that would have
+flaked; and `playmode.fps.tablet.reference2d`, replaced by the restatement.
+
+### Why a self-authored budget is not gate evidence
+
+The P1 gate criterion is the brief's: the reference scene meets its frame budget
+on a throttled tablet. `playmode.cpuFrame.tablet.reference2d` does **not**
+establish that. It measures a different quantity — engine CPU with rasterisation
+excluded — chosen by the implementer, with a ceiling derived by the implementer,
+against a scene written by the implementer.
+
+That is a reasonable thing to gate CI on and an unreasonable thing to close a
+phase with, and the difference is not pedantic: the same budget was offered at
+the first P1 review as proof that deferring the frame-rate target was safe, and
+it turned out not to detect a 3x regression in either half of what it claimed to
+measure (RC-0011). A budget cannot vouch for the deferral of another budget.
+
+**So the P1 criterion table records it as evidence of what it measures, and the
+brief's criterion stays DEFERRED under DV-007.** The deferral is not discharged
+by a substitute; it is discharged by hardware.
+
+### `playmode.cpuFrame.tablet.reference2d` — derivation
+
+- **Quantity.** One 60Hz frame of engine work: the median per-step simulation
+  cost plus the median per-frame scene-graph and submission cost. Divided by the
+  work that produced it so frame cadence — which the rasteriser sets — cannot
+  move it.
+- **Ceiling: 8ms.** Half of 16.67ms, rounded down. The other half must cover
+  rasterisation, compositing, browser overhead, and the gameplay a real project
+  adds. An engine past half the frame on its own has left no room for the game.
+- **Measured: 4.66ms** on the throttled tablet profile (0.26ms per step, 4.40ms
+  per frame).
+- **Sensitivity: about 1.7x.** It catches a doubling of engine frame cost. It
+  does **not** catch a 3x regression confined to simulation, which is 5% of this
+  scene's cost. Nothing tighter is achievable here: run-to-run variance on the
+  sub-millisecond components is roughly 2x.
+- **Held to that by** four scenarios in the audit self-test, including an
+  inverse control asserting a pure rasteriser change does _not_ move it, and one
+  asserting the simulation-only blind spot rather than leaving it to be
+  rediscovered.
+
+### `playmode.droppedFrames.tablet.reference2d` — derivation
+
+- **Quantity.** The fraction of frames exceeding 1.5 refresh intervals (25ms) —
+  frames that demonstrably missed a vsync.
+- **Ceiling: 5%.**
+- **Why not the brief's `min: 60` fps.** That statistic could not be satisfied.
+  It was derived from the 95th-percentile interval between animation-frame
+  callbacks, which the compositor sets at 60Hz: an empty page with no engine
+  measures 59.2fps. See RC-0012.
+- **This is a restatement, not a relaxation.** "60fps" means "drops no frames at
+  60Hz", and this measures that. Its positive control is the empty page, which
+  drops none — committed as a test, because a budget with no run that passes it
+  is not a budget.
+- **Still deferred to P9** as DV-007. Restating it made it expressible; it did
+  not give this environment a GPU.
+
+### Rule going forward
+
+**A budget introduced by the implementer is recorded here with its derivation,
+its measured value, its sensitivity, and a planted-regression scenario in the
+audit self-test — on the day it lands.** Absent any of those, it is removed
+rather than carried. And it is never cited as evidence for a criterion the brief
+states differently.

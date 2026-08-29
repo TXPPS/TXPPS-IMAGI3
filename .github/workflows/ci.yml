@@ -51,11 +51,30 @@ jobs:
       - name: Claims ledger
         run: pnpm verify:claims
 
+      # The other half of the same problem: a comment claiming a runtime
+      # property must name a spec, test or job that exists. The ledger cannot
+      # see this — a commit had touched both files that lied. See RC-0010.
+      - name: Runtime assertions
+        run: pnpm verify:assertions
+
+      # Nothing may be in the tree that nobody accounted for. A review writes
+      # its report and nothing else; one wrote a scratch file here instead.
+      # See docs/SECURITY.md SEC-0001.
+      - name: Tree hygiene
+        run: pnpm check:tree
+
       - name: Unit and integration tests
         run: pnpm test
 
       - name: Audit harness self-test
         run: pnpm audit:selftest
+
+      # Coverage, proven by neutering production code rather than by reasoning
+      # about detectors. The unit subset runs on every commit; the e2e subset is
+      # a phase-gate step because it needs a browser. A survivor is a coverage
+      # hole and fails the build. See docs/BUGS.md RC-0009 and RC-0015.
+      - name: Mutation sweep (unit)
+        run: pnpm mutation:sweep -- --control
 
       - name: Build
         run: pnpm build
@@ -103,6 +122,13 @@ jobs:
 
       - name: Performance budgets
         run: pnpm audit:budgets
+
+      # The browser half of the mutation sweep, which is where the class that
+      # cost the most lives: replacing SceneView.present with an empty function
+      # left 794 tests green (RC-0009). Runs here rather than per commit because
+      # each mutation reruns the whole E2E suite.
+      - name: Mutation sweep (e2e)
+        run: pnpm mutation:sweep -- --suite e2e
 
       - name: Upload audit output
         if: always()
