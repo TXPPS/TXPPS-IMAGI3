@@ -106,7 +106,27 @@ async function sampleColdLoad(
   }
 }
 
+/**
+ * Time this spec is allowed, derived from the work it does.
+ *
+ * It runs on Playwright's 30s default until now, and that was not enough: the
+ * throttling verification fires `THROTTLE_PROBE_PAIRS` pairs of
+ * 80-million-iteration benchmarks on **each** of the four pages this test
+ * opens, and QA Automation saw tablet and phone time out inside a *control*
+ * sample at pass 2 with the host at load average 12. Raising the pair count
+ * from three to five, which is what makes the contended-control filter useful,
+ * makes that worse rather than better.
+ *
+ * Four pages, five pairs, a control leg near 100ms and a throttled leg near
+ * 600ms at 6x, is about 14 seconds of benchmark alone. Two minutes gives that
+ * roughly eight times over, which covers a busy host without hiding a genuine
+ * hang.
+ */
+const COLD_LOAD_TIMEOUT_MS = 120_000;
+
 test.describe('cold load', () => {
+  test.setTimeout(COLD_LOAD_TIMEOUT_MS);
+
   test('stays within the declared budget and records the measurement', async ({
     page,
     profile,

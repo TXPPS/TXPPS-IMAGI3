@@ -321,6 +321,23 @@ describe('cpuFrameMsFrom', () => {
     expect(cpuFrameMsFrom(spread).cpuMs).toBe(5);
   });
 
+  it('averages the two middle values when the sample count is even', () => {
+    // `sorted[floor(n * 0.5)]` is the upper middle, which is the third
+    // appearance of one defect: fixed in the throttle estimator at pass 1,
+    // found again in cpu-bench-page.ts at pass 2, and present here. An even
+    // tail of 1s and 3s has a median of 2, not 3.
+    const half = MIN_FRAMES / 2;
+    const even = samples({
+      updateMs: withTail(1, [
+        ...Array.from({ length: half }, () => 1),
+        ...Array.from({ length: half }, () => 3),
+      ]),
+      simMs: Array.from({ length: COUNT }, () => 1),
+    });
+    // 1ms per step + median(1, 3) = 2ms of update.
+    expect(cpuFrameMsFrom(even).cpuMs).toBe(3);
+  });
+
   it('takes the median, not the 95th percentile', () => {
     const spread = samples({
       updateMs: withTail(

@@ -186,11 +186,33 @@ function usableFrames(samples: FrameSamples): UsableFrame[] {
   return frames;
 }
 
+/**
+ * A percentile by linear interpolation between order statistics.
+ *
+ * The nearest-rank form this replaces returned `sorted[floor(n * f)]`, which is
+ * the *upper* middle at `f = 0.5` — so the "median" of an even-length sample was
+ * the larger of the two middle values. That is the third appearance of the same
+ * defect: fixed in the throttle estimator at pass 1, found again in
+ * `cpu-bench-page.ts` at pass 2, and here. All three were written from the same
+ * one-liner.
+ *
+ * Interpolating is correct for both uses. At `f = 0.5` it averages the middle
+ * pair; at `f = 0.95` it is the standard method and agrees with nearest-rank
+ * wherever the samples are dense, which they are at 30 frames and above.
+ */
 function percentile(sorted: readonly number[], fraction: number): number {
-  const index = Math.min(sorted.length - 1, Math.floor(sorted.length * fraction));
-  const value = sorted[index];
-  if (value === undefined) throw new FrameSampleError('cannot take a percentile of no samples');
-  return value;
+  if (sorted.length === 0) {
+    throw new FrameSampleError('cannot take a percentile of no samples');
+  }
+  const position = (sorted.length - 1) * fraction;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+  const lower = sorted[lowerIndex];
+  const upper = sorted[upperIndex];
+  if (lower === undefined || upper === undefined) {
+    throw new FrameSampleError('cannot take a percentile of no samples');
+  }
+  return lower + (upper - lower) * (position - lowerIndex);
 }
 
 /**
