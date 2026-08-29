@@ -34,6 +34,25 @@ export interface StrayFile {
 }
 
 /**
+ * Whether a mutation run left anything behind.
+ *
+ * Compares the working-tree state of the mutated paths **before** the run to
+ * the state after, rather than either against `HEAD`. Comparing against `HEAD`
+ * reports every file that was already modified when the run started, which
+ * looks exactly like a failed revert — and did, twice: once in
+ * `mutation-sweep.ts` and then again in `mutants.ts`, which was written minutes
+ * after the first was fixed. Extracted here so there is one implementation to
+ * get wrong.
+ *
+ * Both arguments are `git status --porcelain` output limited to the paths the
+ * run touches.
+ */
+export function revertFailure(before: string, after: string): string | undefined {
+  if (before.trim() === after.trim()) return undefined;
+  return `Mutants were not fully reverted.\nbefore:\n${before.trim()}\nafter:\n${after.trim()}`;
+}
+
+/**
  * Paths that are untracked and expected.
  *
  * Deliberately short. Anything not here that appears in the tree during a
@@ -46,6 +65,10 @@ export const EXPECTED_UNTRACKED: readonly string[] = [
   'dist/',
   'dist-types/',
   'playwright-report/',
+  // Written by `pnpm mutants` while a mutation is applied, and removed when it
+  // is reverted. Present only mid-run or after a killed run, which the next
+  // run recovers from.
+  '.mutants-inflight.json',
 ];
 
 function isExpected(path: string): boolean {

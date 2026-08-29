@@ -21,6 +21,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "mutants": "node --experimental-strip-types tools/repo/src/cli/mutants.ts",
     "mutation:sweep": "node --experimental-strip-types tools/repo/src/cli/mutation-sweep.ts",
     "review:worktree": "node --experimental-strip-types tools/repo/src/cli/review-worktree.ts",
     "sweep": "pnpm check:tree && pnpm audit:clean && pnpm verify && pnpm audit:bundle && pnpm test:e2e && pnpm audit:profile-ordering && pnpm audit:budgets",

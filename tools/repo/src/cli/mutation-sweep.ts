@@ -11,6 +11,7 @@ import {
   type Mutation,
   type MutationOutcome,
 } from '../mutations.ts';
+import { revertFailure } from '../tree-hygiene.ts';
 
 /**
  * Apply each mutation, run the suite, and require a test to fail.
@@ -136,11 +137,9 @@ function main(): number {
     );
   }
 
-  const stateAfter = mutatedFileState(repoRoot);
-  if (stateAfter !== stateBefore) {
-    console.error(
-      `\nMutations were not fully reverted.\nbefore:\n${stateBefore}\nafter:\n${stateAfter}`,
-    );
+  const failure = revertFailure(stateBefore, mutatedFileState(repoRoot));
+  if (failure !== undefined) {
+    console.error(`\n${failure}`);
     return EXIT_ERROR;
   }
 

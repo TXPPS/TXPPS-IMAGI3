@@ -45,18 +45,45 @@ function lane(text: string, seed: number): string {
   return fnv1a(text, seed).toString(HEX).padStart(LANE_DIGITS, '0');
 }
 
+/**
+ * Every field of {@link EntityState} that the hash covers.
+ *
+ * Declared as data so a test can compare it against the runtime keys of an
+ * actual state object. An explicit field list in the mapping function below is
+ * a deliberate choice — a field added to `EntityState` should be a decision to
+ * hash, not something that silently changes every recorded hash — but on its
+ * own it is exactly the trap that class of decision invites: **a field left out
+ * is invisible, and so is the omission.**
+ *
+ * Velocity was left out, and the entire determinism suite stayed green with it
+ * missing. Ten thousand ticks were being compared by a digest blind to the
+ * quantity that produces the next tick's positions. Found by the mutation
+ * sweep, not by reading. See RC-0015.
+ */
+export const HASHED_FIELDS = ['id', 'x', 'y', 'vx', 'vy', 'controlled'] as const;
+
+/**
+ * Fields deliberately outside the hash, each with the reason it is safe.
+ *
+ * Empty, and that is the current answer rather than a permanent one. Anything
+ * added here must name why the quantity cannot differ between two runs that
+ * should agree — "it is constant" is a reason, "it seemed unimportant" is not.
+ * `controlled` was the only candidate: it is `readonly` and set once from the
+ * scene, so it cannot drift. It is hashed anyway, because a `readonly` marker
+ * is erased at runtime and the cost of including it is one boolean.
+ */
+export const EXCLUDED_FIELDS: readonly string[] = [];
+
 /** Hash of a world snapshot. Identical inputs give identical hashes, always. */
 export function hashSnapshot(state: WorldSnapshot): string {
   const text = canonicalize(
-    // Explicit field list rather than the object as-is. A field added to
-    // EntityState should be a deliberate decision to include in the hash, made
-    // here, rather than something that silently changes every recorded hash.
     state.entities.map((entity) => ({
       id: entity.id,
       x: entity.x,
       y: entity.y,
       vx: entity.vx,
       vy: entity.vy,
+      controlled: entity.controlled,
     })),
   );
   return `${lane(text, FNV_OFFSET_BASIS)}${lane(text, ~FNV_OFFSET_BASIS)}`;

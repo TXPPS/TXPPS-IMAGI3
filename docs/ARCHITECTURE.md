@@ -189,6 +189,57 @@ So the two run together and answer different questions:
 least one test to fail. A survivor is a coverage hole, fails the build, and is
 recorded in `docs/BUGS.md` with the missing assertion named — never as a TODO.
 
+### Enumeration, not judgement
+
+The hand-picked mutation list found two real holes and is worth keeping. It is
+also a list of things someone thought to doubt, and that is exactly what failed:
+both holes were in `packages/core` and `packages/runtime`, which three reviewers
+had independently called well-guarded after choosing 22 mutations of their own.
+**The gap was enumeration coverage, not mutation quality.**
+
+So the floor is mechanical. `pnpm mutants` derives the mutant set from the AST —
+every exported function gets an empty body, an identity return and a constant
+return; every `sort`, `filter`, predicate and multi-argument call gets its own
+neutering — and nobody decides what is worth doubting. Hand-picked mutations
+supplement that set; they never substitute for it.
+
+`mutation-baseline.json` then makes it a **ratchet**: enumerated and killed
+counts per package, and a commit that lowers a kill ratio fails. New exports
+enter the enumeration by existing, so unguarded code lowers the ratio without
+anyone having to remember to register it.
+
+The ratio is deliberately not required to be 1. Some survivors are legitimate,
+and demanding perfection produces assertions written to satisfy the ratchet
+rather than to catch anything. What is forbidden is going backwards.
+
+### A projection is a guard
+
+> **A property test is only as strong as the projection it compares. Hashes,
+> digests, and canonical forms are guards, and are subject to guard audit like
+> any other.**
+
+The determinism suite compares a state hash. The round-trip suite compares a
+canonical form. Neither can see a field that is absent from what it compares,
+and both will report agreement about a quantity they are not looking at.
+
+That is not hypothetical either: velocity was missing from the state hash, and
+ten thousand ticks were being compared by a digest blind to the quantity that
+produces the next tick's positions. The suite was green throughout.
+
+So both projections are audited by enumeration rather than by example:
+
+- `packages/runtime/test/hash.test.ts` asserts every runtime key of
+  `EntityState` is either in `HASHED_FIELDS` or in `EXCLUDED_FIELDS` with a
+  stated reason, and that each hashed field actually moves the digest.
+- `packages/core/test/schema/field-audit.test.ts` asserts the load boundary
+  returns exactly the declared fields, and that a loaded document is
+  byte-identical to the one it was given — which the round-trip test cannot
+  show, because it compares the result of validation to itself.
+
+Testing "vx changes the hash" once vx is known to be missing closes an instance.
+These close the class: a field added tomorrow fails until somebody decides
+whether it belongs.
+
 ## Constraints that shape everything downstream
 
 These come from the brief and are not negotiable by later phases:

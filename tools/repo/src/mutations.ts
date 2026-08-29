@@ -102,6 +102,42 @@ const PROVEN: readonly Mutation[] = [
   },
 ];
 
+/**
+ * Projection audits: a field silently dropped from a hash or a canonical form.
+ *
+ * A property test is only as strong as what it projects. The determinism suite
+ * compares a digest; the round-trip test compares a canonical form. A field
+ * absent from either is invisible to the test that exists to catch it changing
+ * — which is exactly how velocity went missing from the state hash and nothing
+ * noticed for a whole phase.
+ *
+ * These two mutations are the proof that the audits added for that class are
+ * not vacuous. Each drops one field from one projection.
+ */
+const PROJECTION_AUDITS: readonly Mutation[] = [
+  {
+    id: 'runtime.hash.dropControlled',
+    file: 'packages/runtime/src/hash.ts',
+    find: '      controlled: entity.controlled,\n',
+    replace: '',
+    breaks: 'A field of simulation state leaves the digest the determinism gate compares.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'core.validate.dropOrder',
+    file: 'packages/core/src/schema/validate.ts',
+    find: '    parent: parent ?? null,\n    order,\n',
+    replace: '    parent: parent ?? null,\n',
+    breaks:
+      "An entity's ordering key is accepted at the boundary and then dropped, " +
+      'which the round-trip test cannot see because it compares the validated ' +
+      'document to itself.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+];
+
 /** Load-bearing exports in core and runtime, one neutering mutation each. */
 const CORE_AND_RUNTIME: readonly Mutation[] = [
   {
@@ -241,7 +277,21 @@ const CORE_AND_RUNTIME: readonly Mutation[] = [
   },
 ];
 
-export const MUTATIONS: readonly Mutation[] = [...PROVEN, ...CORE_AND_RUNTIME];
+/**
+ * Hand-picked mutations.
+ *
+ * These **supplement** the mechanically enumerated set in `enumerate.ts`; they
+ * never substitute for it. Judgement chose these, and judgement is what missed
+ * the two holes the first sweep found — in packages three reviewers had
+ * independently called well-guarded, using 22 mutations they had chosen
+ * themselves. Enumeration is the floor; this list is what enumeration cannot
+ * express, such as a field dropped from a projection.
+ */
+export const MUTATIONS: readonly Mutation[] = [
+  ...PROVEN,
+  ...PROJECTION_AUDITS,
+  ...CORE_AND_RUNTIME,
+];
 
 /**
  * The positive control. See `unguarded.ts` for why it lives in its own file.

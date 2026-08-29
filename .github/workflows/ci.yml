@@ -79,6 +79,37 @@ jobs:
       - name: Build
         run: pnpm build
 
+  # The enumerated mutant sweep and its coverage ratchet.
+  #
+  # A separate job because it is the long one: ~300 mutants, each running the
+  # three engine suites, roughly 40 minutes. It is not folded into `verify`
+  # because a 40-minute static-analysis job would stop people running `verify`
+  # locally, and it is not folded into `e2e` because the two fail for unrelated
+  # reasons and a combined job makes the cause ambiguous.
+  #
+  # The fast hand-picked sweep still runs in `verify` on every commit. This one
+  # is what catches a new export landing unguarded. See docs/ARCHITECTURE.md,
+  # "Enumeration, not judgement".
+  mutation-ratchet:
+    name: Mutation coverage ratchet
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Enumerated mutants against the committed baseline
+        run: pnpm mutants
+
   e2e:
     name: End-to-end on three device profiles
     runs-on: ubuntu-latest
