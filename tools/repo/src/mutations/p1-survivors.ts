@@ -27,6 +27,19 @@ import type { Mutation } from '../mutations.ts';
  */
 export const P1_SURVIVORS: readonly Mutation[] = [
   {
+    id: 'render.entityColour.shifted',
+    file: 'packages/render/src/view.ts',
+    find: 'const ENTITY_COLOR = 0x6fd3c7;',
+    replace: 'const ENTITY_COLOR = 0x87ebdf;',
+    breaks:
+      'The colour the scene specifies, by +24 on every channel. Invisible to ' +
+      'the pixel mask, whose ±24 slack exists to find sprites rather than to ' +
+      'judge them, and close to the +37 the image comparator is blind to on ' +
+      'flat-shaded content — two blind spots that overlapped.',
+    suite: 'e2e',
+    expect: 'killed',
+  },
+  {
     id: 'render.meshCount.hardcoded',
     file: 'packages/render/src/view.ts',
     find: '    get meshCount() {\n      return pool.length;\n    },',

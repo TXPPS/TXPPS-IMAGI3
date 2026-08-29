@@ -43,8 +43,50 @@ const READY_TIMEOUT_MS = 30_000;
 
 /** Colour the reference scene draws its sprites in, from `view.ts`. */
 const ENTITY_RGB = { r: 0x6f, g: 0xd3, b: 0xc7 } as const;
-/** Per-channel slack, so a colour-managed pipeline is not a false failure. */
+/**
+ * Per-channel slack for *finding* sprites, so a colour-managed pipeline is not
+ * a false failure.
+ *
+ * Deliberately loose, and therefore useless as a colour check: an all-channel
+ * shift of +24 is invisible to it, which is numerically close to the +37 drift
+ * GAP-002 records the image comparator as blind to. Visual QA pointed out at
+ * pass 2 that this reproduced the blind spot rather than narrowing it, and that
+ * neither document said so. {@link MODAL_CHANNEL_TOLERANCE} is the narrowing.
+ */
 const CHANNEL_TOLERANCE = 24;
+
+/**
+ * Per-channel slack for *judging* the sprite colour.
+ *
+ * Tight, because it is applied to the frame's modal sprite colour rather than
+ * to each pixel: the mode is the flat interior of the quads, unaffected by
+ * edge antialiasing, so there is nothing here for a loose tolerance to absorb.
+ * Eight allows for a colour-managed pipeline nudging a channel and fails the
+ * +24 shift the mask above cannot see.
+ */
+const MODAL_CHANNEL_TOLERANCE = 8;
+
+/** The most common colour in the frame that is not the background. */
+function modalSpriteColour(image: RgbaImage): { r: number; g: number; b: number } | undefined {
+  const counts = new Map<number, number>();
+  for (let i = 0; i < image.data.length; i += 4) {
+    if (!isEntityPixel(image, i)) continue;
+    const key =
+      ((image.data[i] ?? 0) << 16) | ((image.data[i + 1] ?? 0) << 8) | (image.data[i + 2] ?? 0);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  let best: number | undefined;
+  let bestCount = 0;
+  for (const [key, count] of counts) {
+    if (count > bestCount) {
+      best = key;
+      bestCount = count;
+    }
+  }
+  if (best === undefined) return undefined;
+  const BYTE = 0xff;
+  return { r: (best >> 16) & BYTE, g: (best >> 8) & BYTE, b: best & BYTE };
+}
 
 /**
  * Coverage the scene must draw, computed from the scene.
@@ -199,6 +241,32 @@ test.describe('the renderer draws', () => {
     expect(ratio, `more was drawn than the scene contains — ${shape}`).toBeLessThan(
       MAX_COVERAGE_RATIO,
     );
+  });
+
+  test('draws the sprites in the colour the scene specifies', async ({ page }) => {
+    // Independent of the mask above, and much tighter. The mask's ±24 exists so
+    // a colour-managed pipeline is not a false failure, and it means an
+    // all-channel +24 shift is invisible to every assertion that uses it —
+    // numerically close to the +37 drift the image comparator is recorded as
+    // blind to, so the two blind spots overlapped instead of covering for each
+    // other.
+    await startPlaying(page, REFERENCE_2D_ENTITY_COUNT);
+    const frame = await captureScreenshot(page);
+    const colour = modalSpriteColour(frame);
+    expect(colour, 'no sprite-coloured pixels in the frame').toBeDefined();
+    if (colour === undefined) return;
+
+    const shown = `#${[colour.r, colour.g, colour.b].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+    for (const [channel, drawn, want] of [
+      ['red', colour.r, ENTITY_RGB.r],
+      ['green', colour.g, ENTITY_RGB.g],
+      ['blue', colour.b, ENTITY_RGB.b],
+    ] as const) {
+      expect(
+        Math.abs(drawn - want),
+        `the ${channel} channel drifted: sprites drew ${shown}, scene specifies #6fd3c7`,
+      ).toBeLessThanOrEqual(MODAL_CHANNEL_TOLERANCE);
+    }
   });
 
   test('spreads the scene across both axes, not along one line', async ({ page }) => {

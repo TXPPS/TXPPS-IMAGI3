@@ -63,19 +63,50 @@ gates were calibrated against the editor shell — text and antialiased chrome.
 The renderer draws flat-shaded quads on a flat field, and on that content Visual
 QA measured, with zero rasterisation noise:
 
-| Change to sprite colour | Verdict | diff  | mean SSIM | damaged windows |
-| ----------------------- | ------- | ----- | --------- | --------------- |
-| green +37/255           | PASS    | 0.00% | 0.99788   | 0.00%           |
-| all channels +24        | PASS    | 0.00% | 0.99823   | 0.00%           |
-| chroma rotated ±30      | PASS    | 0.00% | 0.99994   | 0.00%           |
-| every sprite → white    | fail    | 11.9% | 0.98931   | 0.00%           |
+Re-measured at the P1 gate pass 2, **per profile**, because the first table had
+no profile label and neither of its two headline claims survived contact with
+one:
 
-Sprite colour may drift by up to **14.5% on a channel** and pass all three
-gates. Repainting every sprite pure white — the loudest colour regression short
-of erasing them — leaves both SSIM gates untripped, because SSIM measures
-structure and a uniform level shift over sparse flat regions barely moves it.
-Only the per-pixel gate fires, and on this content it is a step function whose
-trip point is the uncalibrated `DEFAULT_PIXEL_THRESHOLD` (GAP-003).
+| Change to sprite colour | Profile | Verdict  | diff  | mean SSIM | damaged windows |
+| ----------------------- | ------- | -------- | ----- | --------- | --------------- |
+| green +37/255           | desktop | PASS     | 0.00% | 0.99799   | 0.00%           |
+| green +37/255           | tablet  | PASS     | 0.00% | 0.99847   | 0.00%           |
+| green +37/255           | phone   | **fail** | 0.00% | 0.99827   | **0.30%**       |
+| all channels +24        | desktop | PASS     | 0.00% | 0.99833   | 0.00%           |
+| all channels +24        | phone   | **fail** | 0.00% | 0.99854   | **0.30%**       |
+| chroma rotated ±30      | all     | PASS     | 0.00% | 0.9998+   | 0.00%           |
+| every sprite → white    | desktop | fail     | 7.43% | 0.98992   | 0.00%           |
+| every sprite → white    | tablet  | fail     | 7.93% | 0.99233   | 0.00%           |
+| every sprite → white    | phone   | fail     | 4.85% | 0.99268   | **1.72%**       |
+
+**Two corrections to the earlier table, both of which mattered.**
+
+The differing-pixel figure for repainting every sprite is 7.43 / 7.93 / 4.85%,
+not 11.9%. It could not have been 11.9% at any commit since the aspect fix: the
+ratio for a full sprite repaint *is* the sprite coverage, and coverage is 7.47 /
+7.97 / 4.83%. The 11.9% describes the **pre-aspect-fix** geometry, where a
+square frustum made a quad draw 4/220 of *both* axes on every profile — about
+13.2% before overlap. The table was measured on the build that fixed GAP-006 and
+never re-measured after it.
+
+The blind spot is real on desktop and tablet and **absent on the phone**. Both
+"repainting every sprite white leaves both SSIM gates untripped" and "colour may
+drift 14.5% on a channel and pass all three gates" are false there: green +37
+trips the damaged-window gate at 0.30% against a 0.20% ceiling. The cause is
+physical rather than lucky — the phone's backing store is capped at DPR 2 and
+upscaled 1.5x into the screenshot, so its soft edges give SSIM structure to lose.
+A table without a profile column could not have shown this.
+
+So the accurate statement is: **on desktop and tablet, sprite colour may drift by
+up to 14.5% on a channel and pass all three gates**, and repainting every sprite
+white leaves both SSIM gates untripped there — only the per-pixel gate fires, and
+on this content it is a step function whose trip point is the uncalibrated
+`DEFAULT_PIXEL_THRESHOLD` (GAP-003).
+
+The pixel spec's own mask carries a ±24 per-channel slack, which is inside this
+blind spot rather than outside it, and `tests/e2e/render.spec.ts` now judges the
+frame's modal sprite colour at ±8 separately from finding sprites at ±24. That
+narrows the gap for the WebGL2 leg; it does not close GAP-003.
 
 That matters precisely here: **different sRGB or output-colour-space handling
 between WebGL2 and WebGPU is the most likely real divergence between the two

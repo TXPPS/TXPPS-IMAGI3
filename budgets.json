@@ -58,8 +58,8 @@
       "scope": "tablet",
       "max": 8,
       "enforcedFrom": "P1",
-      "source": "Derived: half of a 16.67ms 60Hz frame, rounded down. The other half must cover rasterisation, compositing and the gameplay a real project adds. Measured at 4.66ms on the throttled tablet: 0.26ms per simulation step (6%), 0.30ms of scene-graph writes (6%), 4.10ms of draw submission (88%). A shippability bound catching a doubling of the whole frame, or of draw submission; it does not see a regression confined to either small term, where a 12x simulation regression passes and a 3x scene-graph regression moves the total 22%. Run-to-run variance is roughly 2x on this host, so nothing tighter is achievable here. See ADR-0015 and RC-0011.",
-      "min": 0.01
+      "source": "Derived: half of a 16.67ms 60Hz frame, rounded down. The other half must cover rasterisation, compositing and the gameplay a real project adds. Measured at 4.66ms on the throttled tablet: 0.26ms per simulation step (6%), 0.30ms of scene-graph writes (6%), 4.10ms of draw submission (88%). A shippability bound catching a doubling of the whole frame, or of draw submission; it does not see a regression confined to either small term, where a 12x simulation regression passes and a 3x scene-graph regression moves the total 22%. Run-to-run variance is roughly 2x on this host, so nothing tighter is achievable here. The floor of 0.1ms is a plausibility line, not a target: 400 entities of matrix composition plus a draw submission cannot cost less on any hardware, and a broken instrument reports zero. It is what gives the device-pixel-ratio inverse control any power at all, since the ceiling alone cannot be failed by a change that reduces work. See ADR-0015 and RC-0011.",
+      "min": 0.1
     },
     {
       "id": "playmode.fps.phone.reference3d",

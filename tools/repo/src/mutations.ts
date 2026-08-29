@@ -87,7 +87,9 @@ const PROVEN: readonly Mutation[] = [
     replace: 'export const MAX_PIXEL_RATIO = 1;',
     breaks:
       'Nothing in the engine. This is the inverse control: a pure rasteriser ' +
-      'change must NOT move the engine frame budget. It moved it 44% once.',
+      'change must NOT move the engine frame budget. It moved it 44% once. ' +
+      'Its power is bounded and stated — see the note below; the decisive ' +
+      'inverse control is the unit one in frames.test.ts.',
     suite: 'e2e',
     expect: 'survives',
   },
@@ -103,6 +105,32 @@ const PROVEN: readonly Mutation[] = [
     expect: 'killed',
   },
 ];
+
+/**
+ * How much the device-pixel-ratio control can actually prove, stated.
+ *
+ * It is listed as an inverse control and it is one, but Performance measured
+ * its power at the P1 gate pass 2 and the answer was **none**: the play-mode
+ * assertion is one-sided (`toBeLessThanOrEqual` against a ceiling), the
+ * mutation *reduces* rasterisation work, and the measurement sat 42% under the
+ * ceiling — so no value the mutation could produce could fail anything. It
+ * survived by construction, not by evidence. The one time it did fire, the
+ * cause was an unrelated throttle flake.
+ *
+ * Two changes give it some. `playmode.cpuFrame.tablet.reference2d` now declares
+ * a floor, so the budget can fail in the direction this mutation pushes; and
+ * the residual sensitivity is recorded rather than assumed — Performance
+ * measured −10.3% (95% CI −28% to +7%), so the E2E control can demonstrate the
+ * absence of a *large* coupling and nothing finer. Measurement noise is the
+ * bound, and no threshold choice removes it.
+ *
+ * **The decisive inverse control is the unit one**, in
+ * `tools/audit/test/budgets/frames.test.ts`: same samples, more steps per
+ * frame, exact equality required. That is two-sided, zero-tolerance and free of
+ * host noise, and it is what actually holds the rasteriser outside the engine
+ * budget. This entry is the end-to-end corroboration of it, which is worth
+ * having and is not the guarantee.
+ */
 
 /**
  * Projection audits: a field silently dropped from a hash or a canonical form.
