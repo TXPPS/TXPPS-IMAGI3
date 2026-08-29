@@ -55,14 +55,54 @@ function parseArgs(argv: readonly string[]): Options {
  * which the sweep never writes to; the note there records why that is the fix
  * rather than exempting a project from the run.
  */
-function suiteFails(repoRoot: string, suite: Mutation['suite']): boolean {
+/**
+ * Failures that say nothing about the mutation, because they are about the host.
+ *
+ * A non-zero exit is only a kill signal if the failure was *caused by the
+ * mutation*. Under contention the throttling verification fails before a single
+ * assertion about the engine runs, so an e2e mutation scores as killed while
+ * nothing observed it — Visual QA hit this five times in one session at pass 2,
+ * including on a genuine survivor, which would have been recorded as covered.
+ *
+ * These are matched on the diagnoses the harness raises for exactly that: a
+ * contended host, and a page whose throttling could not be verified. Both are
+ * conditions of the machine, not results.
+ */
+/** Room for a whole Playwright run's output, which the markers are searched in. */
+const MAX_SUITE_OUTPUT = 67_108_864;
+
+const INCONCLUSIVE_FAILURES: readonly string[] = [
+  'This host was too busy to measure throttling',
+  'CPU throttling did not take effect on this page',
+];
+
+interface SuiteResult {
+  readonly failed: boolean;
+  /** Set when the failure was about the host rather than about the mutation. */
+  readonly inconclusive: string | undefined;
+}
+
+function suiteFails(repoRoot: string, suite: Mutation['suite']): SuiteResult {
   const command =
     suite === 'e2e' ? ['exec', 'playwright', 'test', '--workers=1'] : ['vitest', 'run', '--silent'];
   try {
-    execFileSync('pnpm', command, { cwd: repoRoot, stdio: 'ignore' });
-    return false;
-  } catch {
-    return true;
+    // Captured rather than discarded, because the failure *text* is what tells
+    // a kill from a host condition. Both streams: Playwright reports assertion
+    // failures on stdout and process errors on stderr.
+    execFileSync('pnpm', command, {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      maxBuffer: MAX_SUITE_OUTPUT,
+    });
+    return { failed: false, inconclusive: undefined };
+  } catch (error) {
+    const streams = error as { stdout?: string; stderr?: string };
+    const output = `${streams.stdout ?? ''}\n${streams.stderr ?? ''}`;
+    return {
+      failed: true,
+      inconclusive: INCONCLUSIVE_FAILURES.find((marker) => output.includes(marker)),
+    };
   }
 }
 
@@ -87,11 +127,23 @@ function runMutation(repoRoot: string, mutation: Mutation): MutationOutcome {
 
   try {
     writeFileSync(path, original.replace(mutation.find, mutation.replace));
-    const killed = suiteFails(repoRoot, mutation.suite);
+    const result = suiteFails(repoRoot, mutation.suite);
+    // A host condition is neither verdict. Throwing rather than scoring it
+    // stops the sweep and says why, which is the honest outcome: the run cannot
+    // report on this mutation, and pretending otherwise records a coverage hole
+    // as covered.
+    if (result.inconclusive !== undefined) {
+      throw new Error(
+        `${mutation.id}: the suite failed for a reason that is not this mutation — ` +
+          `"${result.inconclusive}". That is a condition of the machine, not a ` +
+          'result, and scoring it as a kill would record an unmeasured mutation ' +
+          'as covered. Re-run on a quieter host.',
+      );
+    }
     return {
       mutation,
-      killed,
-      detail: killed ? 'a test failed, as required' : 'no test noticed',
+      killed: result.failed,
+      detail: result.failed ? 'a test failed, as required' : 'no test noticed',
     };
   } finally {
     writeFileSync(path, original);
@@ -123,7 +175,7 @@ function mutatedFileState(repoRoot: string): string {
 function baselineIsGreen(repoRoot: string, mutations: readonly Mutation[]): boolean {
   const suites = new Set(mutations.map((mutation) => mutation.suite));
   for (const suite of suites) {
-    if (suiteFails(repoRoot, suite)) {
+    if (suiteFails(repoRoot, suite).failed) {
       console.error(
         `The ${suite} suite fails before any mutation is applied, so this sweep would ` +
           'report every mutation as killed and measure nothing. Fix the tree first.\n',
