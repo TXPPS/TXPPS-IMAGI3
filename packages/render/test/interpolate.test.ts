@@ -102,3 +102,66 @@ describe('interpolateSnapshots', () => {
     expect(after).toEqual(afterCopy);
   });
 });
+
+/**
+ * The scratch buffer is reused across frames, and reuse is a state machine.
+ *
+ * `scratch.index.clear()` was deletable with the whole suite green, because
+ * every test built a fresh scratch and called `interpolateInto` once. Reused
+ * across frames — which is the only reason the scratch exists — a missing clear
+ * means entities that have left the scene stay in the index forever: the map
+ * grows without bound over a session, and an id that is removed and later
+ * reused interpolates from wherever it was when it left.
+ */
+describe('interpolateInto across frames', () => {
+  function draw(
+    previous: WorldSnapshot,
+    current: WorldSnapshot,
+    alpha: number,
+    scratch: ReturnType<typeof createInterpolationScratch>,
+  ): { id: string; x: number }[] {
+    const drawn: { id: string; x: number }[] = [];
+    interpolateInto(previous, current, alpha, scratch, (_index, id, x) => {
+      drawn.push({ id, x });
+    });
+    return drawn;
+  }
+
+  it('forgets entities that have left the scene', () => {
+    const scratch = createInterpolationScratch();
+    draw(snapshot({ id: 'a', x: 0, y: 0 }, { id: 'b', x: 100, y: 0 }), snapshot(
+      { id: 'a', x: 10, y: 0 },
+      { id: 'b', x: 110, y: 0 },
+    ), 0.5, scratch);
+    expect(scratch.index.size).toBe(2);
+
+    // Frame two: `b` is gone from both snapshots.
+    draw(snapshot({ id: 'a', x: 10, y: 0 }), snapshot({ id: 'a', x: 20, y: 0 }), 0.5, scratch);
+    expect(scratch.index.size).toBe(1);
+    expect(scratch.index.has('b')).toBe(false);
+  });
+
+  it('does not interpolate a returning id from where it was when it left', () => {
+    const scratch = createInterpolationScratch();
+    draw(snapshot({ id: 'a', x: 0, y: 0 }), snapshot({ id: 'a', x: 0, y: 0 }), 0.5, scratch);
+
+    // `a` leaves and comes back somewhere else. With a stale index it would be
+    // drawn half way back to the origin instead of at its new position.
+    const reappeared = draw(
+      snapshot({ id: 'b', x: 500, y: 0 }),
+      snapshot({ id: 'a', x: 500, y: 0 }),
+      0.5,
+      scratch,
+    );
+    expect(reappeared).toEqual([{ id: 'a', x: 500 }]);
+  });
+
+  it('does not grow without bound over many frames', () => {
+    const scratch = createInterpolationScratch();
+    for (let frame = 0; frame < 50; frame += 1) {
+      const one = snapshot({ id: `en_${String(frame)}`, x: frame, y: 0 });
+      draw(one, one, 0.5, scratch);
+    }
+    expect(scratch.index.size).toBe(1);
+  });
+});

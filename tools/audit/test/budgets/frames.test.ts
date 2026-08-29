@@ -210,6 +210,50 @@ describe('cpuFrameMsFrom', () => {
       const larger = samples({ entityCount: 4000, meshCount: 4000 });
       expect(cpuFrameMsFrom(larger).cpuMs).toBe(cpuFrameMsFrom(samples()).cpuMs);
     });
+
+    /**
+     * Warmup discarding, on fixtures that do **not** move with the constant.
+     *
+     * The first attempt at these built its samples with `withTail`, which
+     * derives its length from `WARMUP_FRAMES` — so setting `WARMUP_FRAMES` to
+     * zero shortened the fixture by exactly the frames it should have exposed,
+     * and the mutation survived. That is the projection trap, in the test
+     * written to close one: an expectation computed from the value under test
+     * cannot detect a change to it. The counts below are literal.
+     */
+    describe('warmup', () => {
+      const COLD = 30;
+      const HOT = 30;
+      const run = (warm: number, hot: number): number[] => [
+        ...Array.from({ length: COLD }, () => warm),
+        ...Array.from({ length: HOT }, () => hot),
+      ];
+      const coldStart = (): FrameSamples => ({
+        frameMs: run(500, 16.7),
+        simMs: run(50, 1),
+        updateMs: run(50, 1),
+        presentMs: run(0, 0),
+        stepsPerFrame: run(1, 1),
+        entityCount: 400,
+        meshCount: 400,
+        steps: COLD + HOT,
+      });
+
+      it('costs only the frames that remain after the warmup', () => {
+        // Shader compilation, the first texture upload and JIT tiering all land
+        // in the discarded frames; counting them puts cold-load cost into a
+        // budget about steady state. 1ms per step + 1ms update, 50ms dropped.
+        expect(cpuFrameMsFrom(coldStart()).cpuMs).toBe(2);
+      });
+
+      it('reports the frame count it actually measured', () => {
+        expect(cpuFrameMsFrom(coldStart()).detail).toContain(`${String(HOT)} frames`);
+      });
+
+      it('keeps the warmup out of the dropped-frame ratio', () => {
+        expect(droppedFrameRatioFrom(coldStart()).ratio).toBe(0);
+      });
+    });
   });
 
   /**

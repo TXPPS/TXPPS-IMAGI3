@@ -43,6 +43,54 @@ describe('createSession', () => {
     expect(session.previous()).toEqual(session.current());
   });
 
+  it('advances previous to the state before the last step, every step', () => {
+    // `previous = current` is what makes interpolation a *pair*. Deleting it
+    // pins `previous` to the initial snapshot forever, so every frame after the
+    // first interpolates from the origin — a smear on frame two and a growing
+    // lie after that. It survived the whole suite at the P1 gate, because the
+    // only assertion about `previous` was the one above, on frame zero.
+    const { clock, session } = sessionFor(sceneWith(0, 0, 10, 0), 10);
+    const positions: number[] = [];
+    for (let step = 0; step < 3; step += 1) {
+      clock.advance(10);
+      session.advance();
+      positions.push(session.previous().entities[0]?.x ?? Number.NaN);
+    }
+    // Frame 1's previous is the origin; frames 2 and 3 must have moved on.
+    expect(positions[0]).toBe(0);
+    expect(positions[1]).toBeGreaterThan(0);
+    expect(positions[2]).toBeGreaterThan(positions[1] ?? Number.NaN);
+  });
+
+  it('is one step behind current, not equal to it', () => {
+    const { clock, session } = sessionFor(sceneWith(0, 0, 10, 0), 10);
+    clock.advance(10);
+    session.advance();
+    clock.advance(10);
+    session.advance();
+    expect(session.previous()).not.toEqual(session.current());
+  });
+
+  it('builds the world inside the bounds it was given', () => {
+    // `createSession` took `options.bounds` and could drop it silently: the
+    // world fell back to DEFAULT_BOUNDS and nothing noticed, because no test
+    // passed the option at all.
+    const clock = createManualClock(0);
+    const session = createSession({
+      document: sceneWith(0, 0, 1000, 0),
+      clock,
+      input: emptyTape,
+      seed: 1,
+      stepMs: 10,
+      bounds: { minX: -5, minY: -5, maxX: 5, maxY: 5 },
+    });
+    clock.advance(10);
+    session.advance();
+    // At 1000 units/s for 10ms the entity would reach x=10 unbounded; the wall
+    // it was given is at 5.
+    expect(session.current().entities[0]?.x).toBeLessThanOrEqual(5);
+  });
+
   it('advances the world when the clock does', () => {
     const { clock, session } = sessionFor(sceneWith(0, 0, 10, 0));
     session.advance();
