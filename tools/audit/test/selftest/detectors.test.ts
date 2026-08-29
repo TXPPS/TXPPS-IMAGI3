@@ -1,6 +1,7 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { checkBudgets, findOrphanMeasurements } from '../../src/budgets/check.ts';
 import { parseBudgetDocument } from '../../src/budgets/load.ts';
@@ -15,7 +16,24 @@ import {
   droppedFrameRatioFrom,
   type FrameSamples,
 } from '../../src/budgets/frames.ts';
+import { checkProfileOrdering, type ProfileBenchmark } from '../../src/bench/ordering.ts';
+import { GATE_CLI_PREFIX, SHIPPED_DETECTORS } from '../../src/detectors.ts';
 import { probe } from '../helpers/probes.ts';
+
+/**
+ * Benchmarks in the ordering the throttling rates imply.
+ *
+ * Desktop is unthrottled, tablet asks CDP for 4x and phone for 6x, so a run
+ * where throttling took effect measures each profile slower than the last. That
+ * ordering is the host-independent claim; the absolute numbers are not.
+ */
+function orderedBenchmarks(): ProfileBenchmark[] {
+  return [
+    { profile: 'desktop', medianMs: 100, requestedRate: 1 },
+    { profile: 'tablet', medianMs: 440, requestedRate: 4 },
+    { profile: 'phone', medianMs: 660, requestedRate: 6 },
+  ];
+}
 import { noiseImage, solidImage, withScatteredShift, withWipedBlock } from '../helpers/images.ts';
 
 /**
@@ -381,6 +399,41 @@ const SCENARIOS: readonly DetectorScenario[] = [
     clean: () => canCostFrames(frameSamples()),
     planted: () => canCostFrames(frameSamples({ steps: 0 })),
   },
+  /**
+   * The detector that shipped with no scenario at all.
+   *
+   * `checkProfileOrdering` has a CLI, a step in `pnpm sweep`, a CI job and a
+   * row in the guard audit, and the completeness assertion that exists to
+   * notice exactly this compared two hardcoded lists in one file. It is the
+   * gate that fails when throttling is absent from a whole run — the RC-0006
+   * failure — so it being unexercised was the largest hole in the self-test.
+   */
+  {
+    detector: 'profile ordering',
+    plantedDefect: 'throttling absent from the run, so every profile measures the same host',
+    clean: () => checkProfileOrdering(orderedBenchmarks()).ok,
+    planted: () =>
+      checkProfileOrdering([
+        { profile: 'desktop', medianMs: 100, requestedRate: 1 },
+        { profile: 'tablet', medianMs: 101, requestedRate: 4 },
+        { profile: 'phone', medianMs: 99, requestedRate: 6 },
+      ]).ok,
+  },
+  {
+    detector: 'profile ordering',
+    plantedDefect: 'a profile missing from the run entirely',
+    clean: () => checkProfileOrdering(orderedBenchmarks()).ok,
+    planted: () => checkProfileOrdering(orderedBenchmarks().slice(0, 2)).ok,
+  },
+  {
+    detector: 'profile ordering',
+    plantedDefect: 'a stale artifact whose recorded rate disagrees with the profile',
+    clean: () => checkProfileOrdering(orderedBenchmarks()).ok,
+    planted: () =>
+      checkProfileOrdering(
+        orderedBenchmarks().map((b) => (b.profile === 'phone' ? { ...b, requestedRate: 4 } : b)),
+      ).ok,
+  },
 ];
 
 function canParse(input: unknown): boolean {
@@ -436,10 +489,15 @@ describe('audit harness self-test', () => {
   );
 
   /**
-   * A change detector, and knowingly so: it cannot notice a detector that ships
-   * with no scenario at all. Its job is narrower — to make removing a
-   * scenario, or adding a detector without listing it here, a deliberate edit
-   * to this list rather than a silent omission.
+   * Completeness, against a registry outside this file and against the disk.
+   *
+   * This used to compare the scenarios against a hardcoded set written a few
+   * lines below them, so it could only notice an edit to one of two halves the
+   * same person maintains together. QA Automation showed what that misses:
+   * `checkProfileOrdering` is a shipped detector with a pass/fail verdict, a
+   * CLI, a step in `pnpm sweep`, a CI job and a guard-audit row — and it was in
+   * neither half, so an assertion named "lists a scenario for every detector
+   * the harness ships" passed while a detector shipped with no scenario.
    */
   it('lists a scenario for every detector the harness ships', () => {
     // Scoped to "the phase 0 harness" until the P1 gate, which meant every
@@ -447,21 +505,21 @@ describe('audit harness self-test', () => {
     // them, the engine frame budget, turned out not to detect anything. The
     // scope is now the harness, not a phase. See RC-0011.
     expect(new Set(SCENARIOS.map((s) => s.detector))).toEqual(
-      new Set([
-        'budget checker',
-        'measurement drift checker',
-        'budget config validator',
-        'console allowlist validator',
-        'screenshot comparator',
-        'console guard',
-        'bundle measurer',
-        'measurement file reader',
-        'throttling evidence',
-        'engine frame budget',
-        'dropped frame budget',
-        'frame sample refusal',
-      ]),
+      new Set(SHIPPED_DETECTORS.map((detector) => detector.name)),
     );
+  });
+
+  it('registers every gate CLI on disk, so a new one cannot ship unscenarioed', () => {
+    // The link to the filesystem is what makes the registry more than a second
+    // copy of the list. A measurer is not a gate: it reports, it does not judge.
+    const cliDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../src/cli');
+    const gates = readdirSync(cliDir)
+      .filter((file) => file.startsWith(GATE_CLI_PREFIX) && file.endsWith('.ts'))
+      .sort();
+    const registered = SHIPPED_DETECTORS.map((detector) => detector.cli)
+      .filter((cli): cli is string => cli !== undefined)
+      .sort();
+    expect(registered).toEqual(gates);
   });
 
   it('exercises the bundle measurer on real bytes, not a stub', () => {

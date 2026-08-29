@@ -94,6 +94,12 @@ test.describe('play mode', () => {
     const samples = await readSamples(page);
     expect(samples.steps, 'the simulation ran no steps').toBeGreaterThan(0);
     expect(samples.entityCount).toBe(32);
+    // The mesh count is checked here, at a count that is **not** the reference
+    // scene's, and on every profile. Where it was checked before — against the
+    // literal 400, inside a test that only runs where a CPU budget is declared
+    // — a `meshCount` getter hardcoded to `return 400` passed both unit and
+    // E2E suites, and desktop and phone never ran the check at all.
+    expect(samples.meshCount, 'the renderer allocated a different number of meshes').toBe(32);
   });
 
   test('keeps engine CPU work inside its share of the frame', async ({
@@ -150,13 +156,23 @@ test.describe('play mode', () => {
         throttle: probes,
       });
     }
-    recordMeasurements(`playmode-${profile.id}`, measurements);
-
+    // The honesty assertions come **before** the artifact is written, and the
+    // budget assertion after. Recording first meant a run that had measured the
+    // wrong scene still left a measurement behind: truncating the reference
+    // scene to one entity produced an artifact reading "1.111ms over 1 entities
+    // (1 meshes)" from a failed run. A run that measured the right thing and
+    // exceeded its ceiling should still record — that number is the evidence —
+    // but a run that measured the wrong thing should record nothing.
     expect(samples.entityCount).toBe(REFERENCE_2D_ENTITY_COUNT);
     // Two counts from two sources that must agree: the document's, and what the
     // renderer actually allocated. One number the page chose is not evidence.
+    // A getter hardcoded to the reference count would satisfy this; what makes
+    // it load-bearing is the 32-entity case in the test above.
     expect(samples.meshCount).toBe(REFERENCE_2D_ENTITY_COUNT);
     expect(incidents).toEqual([]);
+
+    recordMeasurements(`playmode-${profile.id}`, measurements);
+
     expect(
       cpu.cpuMs,
       `${profile.label} play mode spent ${cpu.cpuMs.toFixed(2)}ms of engine CPU per frame ` +

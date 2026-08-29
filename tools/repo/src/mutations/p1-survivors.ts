@@ -27,6 +27,18 @@ import type { Mutation } from '../mutations.ts';
  */
 export const P1_SURVIVORS: readonly Mutation[] = [
   {
+    id: 'render.meshCount.hardcoded',
+    file: 'packages/render/src/view.ts',
+    find: '    get meshCount() {\n      return pool.length;\n    },',
+    replace: '    get meshCount() {\n      return 400;\n    },',
+    breaks:
+      'The second of two counts that must agree. It was compared against the ' +
+      'literal 400, in a test that only ran where a CPU budget is declared, so ' +
+      'the cross-check was two literals and desktop and phone never ran it.',
+    suite: 'e2e',
+    expect: 'killed',
+  },
+  {
     id: 'render.resize.dead',
     file: 'packages/render/src/view.ts',
     find: '      renderer.setSize(width, height);',
