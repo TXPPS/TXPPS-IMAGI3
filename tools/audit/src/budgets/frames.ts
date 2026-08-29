@@ -46,6 +46,39 @@ export interface FrameSamples {
   readonly steps: number;
 }
 
+/**
+ * Which fields of a frame sample enter the engine frame statistic.
+ *
+ * Declared, and audited by `frames.test.ts`, for the reason S8 gives about
+ * projections: a statistic is a guard, and a term silently dropped from it is a
+ * guard silently weakened. That is not hypothetical here. Changing
+ * `frame.updateMs + frame.presentMs` to `frame.updateMs` took the gated
+ * measurement from 4.4ms to 0.557ms — a 14x margin against an 8ms ceiling —
+ * with 911 unit tests, the E2E suite and the budget gate all green. QA
+ * Automation and Performance found it independently at the P1 gate, and the
+ * reason nothing saw it is that every fixture in the suite set `presentMs` to
+ * zero, so the term contributed nothing to any expected value.
+ *
+ * `present()` is inside the boundary deliberately: it composes matrices and
+ * submits draws, which is engine work, and RC-0011 is what excluding it cost.
+ * It is also about 80% of the measured quantity on this host, which is why
+ * dropping it is the single most damaging edit available to this file.
+ */
+export const CPU_FRAME_TERMS = ['simMs', 'updateMs', 'presentMs', 'stepsPerFrame'] as const;
+
+/**
+ * Fields deliberately not in the statistic, each with the reason.
+ *
+ * An entry here is a claim that the number does not depend on the field, and
+ * the audit tests it as an inverse control rather than taking it on trust.
+ */
+export const CPU_FRAME_EXCLUDED: Readonly<Record<string, string>> = {
+  frameMs: 'wall-clock frame length — the rasteriser and vsync, which is what this excludes',
+  entityCount: 'scene size; reported in the detail, and not a cost',
+  meshCount: 'scene size; reported in the detail, and not a cost',
+  steps: 'run total, used only for the frozen-world refusal',
+};
+
 export interface FrameVerdict {
   readonly fps: number;
   readonly detail: string;

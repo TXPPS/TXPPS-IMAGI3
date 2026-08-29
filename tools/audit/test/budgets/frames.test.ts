@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CPU_FRAME_EXCLUDED,
+  CPU_FRAME_TERMS,
   FRAME_BUDGET_60HZ_MS,
   FrameSampleError,
   MAX_ENGINE_FRAME_SHARE,
@@ -141,6 +143,73 @@ describe('cpuFrameMsFrom', () => {
   it('catches scene-graph work getting fifteen times more expensive', () => {
     const regressed = samples({ updateMs: Array.from({ length: COUNT }, () => 15) });
     expect(cpuFrameMsFrom(regressed).cpuMs).toBe(16);
+  });
+
+  /**
+   * What the statistic is made of, audited field by field.
+   *
+   * The tests above pin the *reduction* — median, per-step division, the
+   * refusals — and every one of them passed while `presentMs` was droppable,
+   * because each fixture set it to zero. A term worth nothing in every fixture
+   * is a term no assertion can be sensitive to.
+   *
+   * So the composition is declared in `frames.ts` and checked here: every field
+   * of a sample is in exactly one list, every included term moves the number,
+   * and every excluded one does not. The last part is a set of inverse
+   * controls — `frameMs` moving the engine budget would mean the rasteriser had
+   * got back into it, which is RC-0011.
+   */
+  describe('what the statistic is made of', () => {
+    const bumped = (field: (typeof CPU_FRAME_TERMS)[number] | 'frameMs'): number =>
+      cpuFrameMsFrom(samples({ [field]: Array.from({ length: COUNT }, () => 7) })).cpuMs;
+
+    it('accounts for every field of a sample', () => {
+      // A field added tomorrow fails here until someone decides which it is.
+      const fields = Object.keys(samples()).sort();
+      const accounted = [...CPU_FRAME_TERMS, ...Object.keys(CPU_FRAME_EXCLUDED)].sort();
+      expect(fields).toEqual(accounted);
+    });
+
+    it('gives every excluded field a stated reason', () => {
+      for (const [field, reason] of Object.entries(CPU_FRAME_EXCLUDED)) {
+        expect(reason.length, `${field} is excluded with no reason given`).toBeGreaterThan(20);
+      }
+    });
+
+    it('counts the present cost, which is most of the frame on real hardware', () => {
+      // The mutation: `frame.updateMs + frame.presentMs` -> `frame.updateMs`.
+      // 1ms per step + 1ms update + 4ms present.
+      const withPresent = samples({ presentMs: Array.from({ length: COUNT }, () => 4) });
+      expect(cpuFrameMsFrom(withPresent).cpuMs).toBe(6);
+    });
+
+    it('under-reports by the measured proportion if present is dropped', () => {
+      // The proportions measured on this host: 0.26ms per step, 0.30ms of
+      // scene-graph write, 4.40ms of draw submission. Dropping the last leaves
+      // 0.56ms against an 8ms ceiling, which is the 90% under-report Performance
+      // measured and nothing failed on.
+      const real = samples({
+        simMs: Array.from({ length: COUNT }, () => 0.26),
+        updateMs: Array.from({ length: COUNT }, () => 0.3),
+        presentMs: Array.from({ length: COUNT }, () => 4.4),
+      });
+      expect(cpuFrameMsFrom(real).cpuMs).toBeCloseTo(4.96, 10);
+    });
+
+    it.each(CPU_FRAME_TERMS)('is sensitive to %s', (field) => {
+      expect(bumped(field)).not.toBe(cpuFrameMsFrom(samples()).cpuMs);
+    });
+
+    it('is not sensitive to frame length, which is the rasteriser', () => {
+      // An inverse control. `frameMs` moving this number would mean vsync and
+      // the rasteriser had got back inside the engine budget — RC-0011.
+      expect(bumped('frameMs')).toBe(cpuFrameMsFrom(samples()).cpuMs);
+    });
+
+    it('is not sensitive to the scene-size counts', () => {
+      const larger = samples({ entityCount: 4000, meshCount: 4000 });
+      expect(cpuFrameMsFrom(larger).cpuMs).toBe(cpuFrameMsFrom(samples()).cpuMs);
+    });
   });
 
   /**

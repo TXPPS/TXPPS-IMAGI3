@@ -55,9 +55,9 @@ function parseArgs(argv: readonly string[]): Options {
  * which the sweep never writes to; the note there records why that is the fix
  * rather than exempting a project from the run.
  */
-function suiteFails(repoRoot: string, mutation: Mutation): boolean {
+function suiteFails(repoRoot: string, suite: Mutation['suite']): boolean {
   const command =
-    mutation.suite === 'e2e'
+    suite === 'e2e'
       ? ['exec', 'playwright', 'test', '--workers=1']
       : ['vitest', 'run', '--silent'];
   try {
@@ -89,7 +89,7 @@ function runMutation(repoRoot: string, mutation: Mutation): MutationOutcome {
 
   try {
     writeFileSync(path, original.replace(mutation.find, mutation.replace));
-    const killed = suiteFails(repoRoot, mutation);
+    const killed = suiteFails(repoRoot, mutation.suite);
     return {
       mutation,
       killed,
@@ -108,10 +108,39 @@ function mutatedFileState(repoRoot: string): string {
   }).trim();
 }
 
+/**
+ * Refuse to sweep a tree whose suite is already failing.
+ *
+ * The kill signal is an exit code, so **every** mutation reads as killed the
+ * moment anything is red for an unrelated reason. That is the general form of
+ * the defect QA Automation found at the P1 gate: there it was the sweep's own
+ * anchor test failing on the mutated file, and fixing that one masker left the
+ * mechanism intact for any other. A pre-existing failure — a mutation aimed at
+ * uncommitted code, a flaky spec, a half-finished refactor — produces a clean
+ * report in which nothing survived and nothing was measured.
+ *
+ * One run before anything is mutated costs a couple of minutes and makes the
+ * whole sweep's exit code mean what it says.
+ */
+function baselineIsGreen(repoRoot: string, mutations: readonly Mutation[]): boolean {
+  const suites = new Set(mutations.map((mutation) => mutation.suite));
+  for (const suite of suites) {
+    if (suiteFails(repoRoot, suite)) {
+      console.error(
+        `The ${suite} suite fails before any mutation is applied, so this sweep would ` +
+          'report every mutation as killed and measure nothing. Fix the tree first.\n',
+      );
+      return false;
+    }
+  }
+  return true;
+}
+
 function main(): number {
   const repoRoot = findRepoRoot();
   const options = parseArgs(process.argv.slice(2));
   const mutations = mutationsForSuite(options.suite);
+  if (!baselineIsGreen(repoRoot, mutations)) return EXIT_ERROR;
   // Captured before anything is mutated. Comparing the end state against HEAD
   // instead would report every file that was already modified — which on the
   // first run of this tool was one, and looked exactly like a failed revert.

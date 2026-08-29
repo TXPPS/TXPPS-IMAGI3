@@ -157,6 +157,52 @@ const PROJECTION_AUDITS: readonly Mutation[] = [
  */
 const SIMULATION_PHYSICS: readonly Mutation[] = [
   {
+    id: 'audit.frames.dropPresent',
+    file: 'tools/audit/src/budgets/frames.ts',
+    find: '  const perUpdate = sorted(frames.map((frame) => frame.updateMs + frame.presentMs));',
+    replace: '  const perUpdate = sorted(frames.map((frame) => frame.updateMs));',
+    breaks:
+      'The measurement boundary. The gated statistic falls 4.4ms to 0.557ms — a ' +
+      '90% under-report against an 8ms ceiling — and RC-0011 is back. Survived ' +
+      '911 unit tests, the E2E suite and the budget gate at the P1 gate.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'audit.bundle.doubleCount',
+    file: 'tools/audit/src/bundle/measure.ts',
+    find: '    editorBytes: total - runtimeBytes,',
+    replace: '    editorBytes: total,',
+    breaks:
+      'The separation of the two bundle budgets. 97.6% of "the editor bundle" ' +
+      'becomes three.js, and every byte of the renderer is counted twice.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'audit.bundle.shareFloor',
+    file: 'tools/audit/src/bundle/measure.ts',
+    find: 'export const MIN_RUNTIME_SHARE = 0.5;',
+    replace: 'export const MIN_RUNTIME_SHARE = 0;',
+    breaks:
+      'The name-is-not-attribution check. A rename-only split reporting 2,050 ' +
+      'bytes for a 128 KB runtime passes.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'editor.chunks.dropCore',
+    file: 'apps/editor/src/build/chunks.ts',
+    find: "export const ENGINE_PACKAGES: readonly string[] = ['core', 'runtime', 'render'];",
+    replace: "export const ENGINE_PACKAGES: readonly string[] = ['runtime', 'render'];",
+    breaks:
+      'The chunk split. The scene schema, serialiser and graph repair ship in ' +
+      "the editor's entry chunk, and the share check cannot see it because " +
+      'three.js is 97% of the runtime chunk either way.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
     id: 'runtime.drag.noop',
     file: 'packages/runtime/src/simulation.ts',
     find: '  const retained = DRAG_PER_SECOND ** stepSeconds;',

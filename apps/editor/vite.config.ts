@@ -1,20 +1,15 @@
 import { defineConfig } from 'vite';
+import { RUNTIME_CHUNK, chunkFor } from './src/build/chunks.ts';
 
 /**
- * Prefix given to every chunk containing the runtime and the renderer.
+ * The chunk split lives in `src/build/chunks.ts`, where it can be tested.
  *
- * The name exists so `runtime.bundle.gzip` can be measured as its own budget
- * rather than folded into the editor's. Two things follow from that and both
- * are deliberate: the runtime is not in the entry chunk, so the editor shell's
- * cold-load budget is not paying for three.js on every device profile; and the
- * budget is attributable, so a renderer that doubles in size is visible as the
- * renderer growing rather than as the editor growing.
- *
- * Removing this split does not quietly merge the budgets — it leaves
- * `runtime.bundle.gzip` with no measurement, and an enforced budget nobody
- * measured is a gate failure. See ADR-0006.
+ * It was three inline `id.includes(…)` calls here, and `packages/core/` was not
+ * one of them — so the scene schema, the serialiser and the graph repair were
+ * bundled into the entry chunk while `runtime.bundle.gzip` measured the
+ * renderer alone, with nothing able to notice.
  */
-export const RUNTIME_CHUNK = 'imagi3-runtime';
+export { RUNTIME_CHUNK };
 
 /**
  * Relative base so the same build output can be served from a subpath, which
@@ -28,12 +23,7 @@ export default defineConfig({
     reportCompressedSize: true,
     rollupOptions: {
       output: {
-        manualChunks: (id) =>
-          id.includes('/packages/runtime/') ||
-          id.includes('/packages/render/') ||
-          id.includes('/node_modules/three/')
-            ? RUNTIME_CHUNK
-            : undefined,
+        manualChunks: chunkFor,
       },
     },
   },

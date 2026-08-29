@@ -99,28 +99,51 @@ const DROPPED_CEILING = 0.05;
 interface FrameShape {
   readonly simCost?: number;
   readonly updateCost?: number;
+  readonly presentCost?: number;
+  /** Scales all three engine terms at once: a whole-frame regression. */
+  readonly frameCost?: number;
   readonly stepsPerFrame?: number;
   readonly frameMs?: number;
   readonly steps?: number;
 }
 
 /**
+ * The reference scene's measured cost on the throttled tablet profile, split
+ * into the three terms that actually make it up.
+ *
+ * Previously the last two were folded together — 4.40ms of "scene-graph work"
+ * with `presentMs` fixed at zero — and that fold was doing real damage. It made
+ * `presentMs` droppable with the whole suite green, because no fixture gave it
+ * a value; and it made the `updateCost: 2` scenario look like a detected
+ * regression when what it doubled was 94% draw submission. QA Automation
+ * measured the true split at the P1 gate: scene-graph writes are about 6% of
+ * this statistic, so a genuine 3x increase in them moves it 22%.
+ */
+const STEP_MS = 0.26;
+const UPDATE_MS = 0.3;
+const PRESENT_MS = 4.1;
+
+/**
  * Frame samples shaped like a real run, with one dimension planted at a time.
  *
  * Baseline is the reference scene's measured cost on the throttled tablet
- * profile: 0.26ms per simulation step and 4.40ms per frame of scene-graph work
- * and draw submission, totalling 4.66ms against the 8ms ceiling.
+ * profile: 0.26ms per simulation step, 0.30ms of scene-graph writes and 4.10ms
+ * of draw submission — 4.66ms against the 8ms ceiling, of which draw submission
+ * is 88%. Those proportions are what decide which regressions this budget can
+ * see, so they are in the fixture rather than in a comment.
  */
 function frameSamples(shape: FrameShape = {}): FrameSamples {
   const frames = 120;
   const steps = shape.stepsPerFrame ?? 1;
-  const sim = 0.26 * (shape.simCost ?? 1) * steps;
-  const update = 4.4 * (shape.updateCost ?? 1);
+  const whole = shape.frameCost ?? 1;
+  const sim = STEP_MS * (shape.simCost ?? 1) * whole * steps;
+  const update = UPDATE_MS * (shape.updateCost ?? 1) * whole;
+  const present = PRESENT_MS * (shape.presentCost ?? 1) * whole;
   return {
     frameMs: Array.from({ length: frames }, () => shape.frameMs ?? 16.7),
     simMs: Array.from({ length: frames }, () => sim),
     updateMs: Array.from({ length: frames }, () => update),
-    presentMs: Array.from({ length: frames }, () => 0),
+    presentMs: Array.from({ length: frames }, () => present),
     stepsPerFrame: Array.from({ length: frames }, () => steps),
     entityCount: 400,
     meshCount: 400,
@@ -301,22 +324,41 @@ const SCENARIOS: readonly DetectorScenario[] = [
   },
   {
     detector: 'engine frame budget',
-    plantedDefect: 'frame work twice as expensive, which is the bound this can see',
+    plantedDefect: 'the whole engine frame twice as expensive, which is the bound this can see',
     clean: () => cpuFrameMsFrom(frameSamples()).cpuMs <= ENGINE_FRAME_CEILING_MS,
-    planted: () => cpuFrameMsFrom(frameSamples({ updateCost: 2 })).cpuMs <= ENGINE_FRAME_CEILING_MS,
+    planted: () => cpuFrameMsFrom(frameSamples({ frameCost: 2 })).cpuMs <= ENGINE_FRAME_CEILING_MS,
+  },
+  {
+    detector: 'engine frame budget',
+    plantedDefect: 'draw submission twice as expensive, which is 88% of the statistic',
+    clean: () => cpuFrameMsFrom(frameSamples()).cpuMs <= ENGINE_FRAME_CEILING_MS,
+    planted: () => cpuFrameMsFrom(frameSamples({ presentCost: 2 })).cpuMs <= ENGINE_FRAME_CEILING_MS,
   },
   {
     /**
-     * The limit, asserted rather than left to be discovered. Simulation is 5%
-     * of this scene's engine frame cost, so a budget on the total cannot see a
-     * 3x change in it. That is a real gap and it is recorded in RC-0011 rather
-     * than papered over — this scenario exists to fail if anyone later claims
-     * otherwise.
+     * The limit, asserted rather than left to be discovered. Simulation is
+     * about 6% of this scene's engine frame cost, so a budget on the total
+     * cannot see a 3x change in it. That is a real gap, recorded in RC-0011
+     * rather than papered over — this scenario exists to fail if anyone later
+     * claims otherwise.
      */
     detector: 'engine frame budget',
     plantedDefect: 'simulation three times more expensive, which this CANNOT see',
     clean: () => cpuFrameMsFrom(frameSamples()).cpuMs <= ENGINE_FRAME_CEILING_MS,
     planted: () => cpuFrameMsFrom(frameSamples({ simCost: 3 })).cpuMs > ENGINE_FRAME_CEILING_MS,
+  },
+  {
+    /**
+     * The same limit on the other small term, and the one the previous fixture
+     * hid. Folding draw submission into `updateMs` made `updateCost: 2` look
+     * like a caught regression; split out, the scene-graph write is about 6% of
+     * the statistic and tripling it moves the total by a fifth. QA Automation
+     * measured 22% on real runs, inside the measurement's own 36% spread.
+     */
+    detector: 'engine frame budget',
+    plantedDefect: 'scene-graph writes three times more expensive, which this CANNOT see',
+    clean: () => cpuFrameMsFrom(frameSamples()).cpuMs <= ENGINE_FRAME_CEILING_MS,
+    planted: () => cpuFrameMsFrom(frameSamples({ updateCost: 3 })).cpuMs > ENGINE_FRAME_CEILING_MS,
   },
   {
     detector: 'engine frame budget',
