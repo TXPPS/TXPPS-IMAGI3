@@ -39,7 +39,14 @@ export const REFERENCE_2D_SEED = 0x1a61f3;
  */
 const ID_SEED_OFFSET = 0x5bf03635;
 
-const SPREAD = 180;
+/**
+ * Width of the square the scene's entities are scattered across, in world units.
+ *
+ * Exported so the E2E spec can derive where the drawn content should be, rather
+ * than asserting that it reaches some fraction of the frame. That weaker form
+ * was satisfied *harder* by a broken renderer than by a working one.
+ */
+export const SPREAD = 180;
 const SPEED = 40;
 const HALF = 0.5;
 

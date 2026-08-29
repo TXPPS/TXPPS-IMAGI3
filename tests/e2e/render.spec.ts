@@ -1,5 +1,11 @@
 import { PARITY_THRESHOLDS, compareImages, type RgbaImage } from '@imagi3/audit';
-import { WEBGPU_PARITY_GAP, formatParityReport, judgeParity } from '@imagi3/render';
+import {
+  QUAD_SIZE,
+  VIEW_EXTENT,
+  WEBGPU_PARITY_GAP,
+  formatParityReport,
+  judgeParity,
+} from '@imagi3/render';
 import {
   ENTITY_COUNT_PARAM,
   PLAY_PARAM,
@@ -7,6 +13,10 @@ import {
   REFERENCE_2D,
   STOP_PLAY_MODE_KEY,
 } from '../../apps/editor/src/playmode/params.ts';
+import {
+  REFERENCE_2D_ENTITY_COUNT,
+  SPREAD,
+} from '../../apps/editor/src/playmode/reference-scene.ts';
 import { captureScreenshot } from './visual.ts';
 import { expect, test } from './fixtures.ts';
 import type { Page } from '@playwright/test';
@@ -37,27 +47,112 @@ const ENTITY_RGB = { r: 0x6f, g: 0xd3, b: 0xc7 } as const;
 const CHANNEL_TOLERANCE = 24;
 
 /**
- * Fraction of the frame the sprites must cover.
+ * Coverage the scene must draw, computed from the scene.
  *
- * Derived from the scene rather than chosen: 400 quads of 4 world units in a
- * 220-unit short axis cover roughly 0.03% each if none overlap, so a floor of
- * 0.5% is well under what the scene draws and far above what a blank frame
- * draws, which is zero.
+ * The camera fits {@link VIEW_EXTENT} either side of the origin onto the
+ * viewport's **short** axis, so one {@link QUAD_SIZE} quad is
+ * `QUAD_SIZE / (2 * VIEW_EXTENT)` of that axis, and its area as a fraction of
+ * the frame is that squared, times `short / long`. Times the entity count, and
+ * that is the coverage a correct render produces if no two sprites overlap.
+ *
+ * This replaces a floor of 0.5% against a scene that draws 7.5% — a floor 15x
+ * below the truth, which is why 350 of 400 sprites could vanish and every
+ * sprite could collapse onto one horizontal line without it firing. Visual QA
+ * demonstrated both at the P1 gate. The measured values were 7.47% / 7.97% /
+ * 4.83% against this formula's 8.27% / 8.82% / 6.11%: ratios of 0.90, 0.90 and
+ * 0.79, the shortfall being overlap.
+ *
+ * **What it cannot see**, stated rather than discovered: the formula shares
+ * `QUAD_SIZE` and `VIEW_EXTENT` with the renderer, so changing either moves
+ * both sides and the band does not notice. Those are design parameters, and a
+ * change to them is visible in the single-sprite geometry test instead.
  */
-const MIN_ENTITY_COVERAGE = 0.005;
+function expectedCoverage(entities: number, width: number, height: number): number {
+  const short = Math.min(width, height);
+  const long = Math.max(width, height);
+  const sideFraction = QUAD_SIZE / (2 * VIEW_EXTENT);
+  return entities * sideFraction * sideFraction * (short / long);
+}
 
-function countEntityPixels(image: RgbaImage): number {
+/** Overlap only ever removes coverage; the measured shortfall is about 10-21%. */
+const MIN_COVERAGE_RATIO = 0.6;
+/** Above the no-overlap ceiling means something is drawing that should not be. */
+const MAX_COVERAGE_RATIO = 1.1;
+
+/**
+ * Extent of the drawn block along the short axis, as a fraction of it.
+ *
+ * The entities are scattered across a {@link SPREAD}-unit square, so the block
+ * they occupy — plus half a quad of bleed at each edge — spans
+ * `(SPREAD + QUAD_SIZE) / (2 * VIEW_EXTENT)` of the short axis in **both**
+ * directions. Asserting the span rather than "content reaches past the middle"
+ * is what distinguishes a drawn scene from a single horizontal bar through the
+ * origin, which reached past the middle by three thousandths and passed.
+ */
+const BLOCK_SPAN = (SPREAD + QUAD_SIZE) / (2 * VIEW_EXTENT);
+/** Slack for edge quantisation and for the scene's random extremes. */
+const SPAN_TOLERANCE = 0.25;
+
+interface DrawnRegion {
+  readonly count: number;
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+}
+
+function isEntityPixel(image: RgbaImage, i: number): boolean {
+  return (
+    Math.abs((image.data[i] ?? 0) - ENTITY_RGB.r) <= CHANNEL_TOLERANCE &&
+    Math.abs((image.data[i + 1] ?? 0) - ENTITY_RGB.g) <= CHANNEL_TOLERANCE &&
+    Math.abs((image.data[i + 2] ?? 0) - ENTITY_RGB.b) <= CHANNEL_TOLERANCE
+  );
+}
+
+/** Where the sprites are, and how many pixels of them there are. */
+function drawnRegion(image: RgbaImage): DrawnRegion {
   let count = 0;
-  for (let i = 0; i < image.data.length; i += 4) {
-    if (
-      Math.abs((image.data[i] ?? 0) - ENTITY_RGB.r) <= CHANNEL_TOLERANCE &&
-      Math.abs((image.data[i + 1] ?? 0) - ENTITY_RGB.g) <= CHANNEL_TOLERANCE &&
-      Math.abs((image.data[i + 2] ?? 0) - ENTITY_RGB.b) <= CHANNEL_TOLERANCE
-    ) {
+  let minX = image.width;
+  let maxX = -1;
+  let minY = image.height;
+  let maxY = -1;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      if (!isEntityPixel(image, (y * image.width + x) * 4)) continue;
       count += 1;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
     }
   }
-  return count;
+  return { count, minX, maxX, minY, maxY };
+}
+
+/** Fraction of the frame's height the negative control repaints. */
+const PERTURBED_BAND = 0.1;
+
+/**
+ * A copy of a real capture with one band repainted, for a negative control.
+ *
+ * Repaints rather than shifts, so the change is unambiguous to both the
+ * per-pixel gate and the structural one: a band of the entity colour laid over
+ * whatever was there. Ten percent of the frame's height is far above every
+ * threshold in `PARITY_THRESHOLDS` and far below "a different image".
+ */
+function perturb(image: RgbaImage): RgbaImage {
+  const data = new Uint8Array(image.data);
+  const bandRows = Math.max(1, Math.round(image.height * PERTURBED_BAND));
+  for (let y = 0; y < bandRows; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      const i = (y * image.width + x) * 4;
+      data[i] = ENTITY_RGB.r;
+      data[i + 1] = ENTITY_RGB.g;
+      data[i + 2] = ENTITY_RGB.b;
+      data[i + 3] = 255;
+    }
+  }
+  return { width: image.width, height: image.height, data };
 }
 
 function distinctColours(image: RgbaImage): number {
@@ -81,20 +176,49 @@ async function startPlaying(page: Page, entities: number): Promise<void> {
 test.describe('the renderer draws', () => {
   test.setTimeout(READY_TIMEOUT_MS * 2);
 
-  test('puts the scene on the canvas rather than leaving it blank', async ({ page }) => {
-    await startPlaying(page, 400);
+  test('draws as much of the scene as the scene has', async ({ page }) => {
+    await startPlaying(page, REFERENCE_2D_ENTITY_COUNT);
     const frame = await captureScreenshot(page);
-    const coverage = countEntityPixels(frame) / (frame.width * frame.height);
+    const region = drawnRegion(frame);
+    const coverage = region.count / (frame.width * frame.height);
+    const expected = expectedCoverage(REFERENCE_2D_ENTITY_COUNT, frame.width, frame.height);
+    const ratio = coverage / expected;
+    const shape =
+      `${(coverage * 100).toFixed(3)}% covered against ${(expected * 100).toFixed(3)}% ` +
+      `expected from the scene (ratio ${ratio.toFixed(2)})`;
 
     expect(
       distinctColours(frame),
       'the frame is a single flat colour, so nothing was drawn',
     ).toBeGreaterThan(1);
-    expect(
-      coverage,
-      `sprites cover ${(coverage * 100).toFixed(3)}% of the frame, below the ` +
-        `${(MIN_ENTITY_COVERAGE * 100).toFixed(1)}% the reference scene must draw`,
-    ).toBeGreaterThan(MIN_ENTITY_COVERAGE);
+    // Below the band: sprites are missing, or collapsed on top of each other.
+    // Above it: something is drawing that the scene does not contain.
+    expect(ratio, `too little of the scene reached the frame — ${shape}`).toBeGreaterThan(
+      MIN_COVERAGE_RATIO,
+    );
+    expect(ratio, `more was drawn than the scene contains — ${shape}`).toBeLessThan(
+      MAX_COVERAGE_RATIO,
+    );
+  });
+
+  test('spreads the scene across both axes, not along one line', async ({ page }) => {
+    // Collapsing every sprite to y=0 leaves a 16px bar through the middle of an
+    // otherwise black frame. It passed a coverage floor and passed "content
+    // reaches past the vertical middle" — by three thousandths, because a bar
+    // through the origin lands just below centre.
+    await startPlaying(page, REFERENCE_2D_ENTITY_COUNT);
+    const frame = await captureScreenshot(page);
+    const region = drawnRegion(frame);
+    expect(region.count, 'nothing was drawn').toBeGreaterThan(0);
+
+    const short = Math.min(frame.width, frame.height);
+    const spanX = (region.maxX - region.minX + 1) / short;
+    const spanY = (region.maxY - region.minY + 1) / short;
+    const floor = BLOCK_SPAN * (1 - SPAN_TOLERANCE);
+    const shape = `${spanX.toFixed(2)} x ${spanY.toFixed(2)} of the short axis`;
+
+    expect(spanX, `the drawn block is too narrow: ${shape}`).toBeGreaterThan(floor);
+    expect(spanY, `the drawn block is too short: ${shape}`).toBeGreaterThan(floor);
   });
 
   test('draws a moving scene, not one still frame', async ({ page }) => {
@@ -167,33 +291,126 @@ test.describe('the renderer draws', () => {
   /**
    * Rotation. `SceneView.resize` existed and was called by nothing at the P1
    * gate, so a rotated tablet drew the scene into the top 45% of the screen.
+   *
+   * The first assertion written for that was "content reaches the lower half of
+   * the frame", and Visual QA showed at pass 2 that **the defect satisfies it
+   * harder than the fix does**: with `resize` dead the scene is clipped and runs
+   * off the bottom edge, measuring 0.959 where a working renderer measures
+   * 0.787. Reaching past the middle is not the property; tracking the viewport
+   * is, and the geometry that says so was being read and thrown away.
    */
-  test('follows the viewport when the device rotates', async ({ page, profile }) => {
-    await startPlaying(page, 400);
+  async function canvasGeometry(page: Page): Promise<{
+    attrWidth: number;
+    attrHeight: number;
+    cssWidth: number;
+    cssHeight: number;
+    innerWidth: number;
+    innerHeight: number;
+  } | null> {
+    return page.evaluate(() => {
+      const canvas = document.querySelector('canvas');
+      if (canvas === null) return null;
+      const box = canvas.getBoundingClientRect();
+      return {
+        attrWidth: canvas.width,
+        attrHeight: canvas.height,
+        cssWidth: box.width,
+        cssHeight: box.height,
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+      };
+    });
+  }
+
+  test('resizes the canvas to the rotated viewport', async ({ page, profile }) => {
+    await startPlaying(page, REFERENCE_2D_ENTITY_COUNT);
     const rotated = { width: profile.viewport.height, height: profile.viewport.width };
     await page.setViewportSize(rotated);
     await page.waitForTimeout(500);
 
-    const size = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas');
-      return canvas === null ? null : { width: canvas.width, height: canvas.height };
-    });
+    const size = await canvasGeometry(page);
     expect(size, 'no canvas after rotation').not.toBeNull();
+    if (size === null) return;
+
+    // The CSS box is the viewport. RC-0013 was the other failure mode of this
+    // line: `setSize(w, h, false)` left the canvas with no CSS size, the
+    // attribute drove layout, the container grew, and the observer refired —
+    // a phone settled at a 1827px root inside a 390px viewport.
+    expect(size.cssWidth, 'the canvas is not as wide as the rotated viewport').toBeCloseTo(
+      size.innerWidth,
+      0,
+    );
+    expect(size.cssHeight, 'the canvas is not as tall as the rotated viewport').toBeCloseTo(
+      size.innerHeight,
+      0,
+    );
+    // The backing store is the CSS box times the capped device pixel ratio, and
+    // the same ratio on both axes — a backing store that kept its
+    // pre-rotation shape is exactly the dead-`resize` signature.
+    const ratioX = size.attrWidth / size.cssWidth;
+    const ratioY = size.attrHeight / size.cssHeight;
+    expect(ratioX, 'the canvas backing store does not track its CSS box').toBeCloseTo(ratioY, 1);
+
+    // And the page must not have grown a scrollbar's worth of layout out of it.
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollHeight - window.innerHeight,
+    );
+    expect(overflow, 'the rotated page overflows its own viewport').toBeLessThanOrEqual(1);
+  });
+
+  test('re-centres the scene when the device rotates', async ({ page, profile }) => {
+    await startPlaying(page, REFERENCE_2D_ENTITY_COUNT);
+    const rotated = { width: profile.viewport.height, height: profile.viewport.width };
+    await page.setViewportSize(rotated);
+    await page.waitForTimeout(500);
 
     const frame = await captureScreenshot(page);
-    // Content must reach the far half of the newly long axis; before the fix it
-    // stopped at the old extent and left the rest of the screen empty.
-    let lowest = -1;
-    for (let y = 0; y < frame.height; y += 1) {
-      for (let x = 0; x < frame.width; x += 1) {
-        const i = (y * frame.width + x) * 4;
-        if (Math.abs((frame.data[i + 1] ?? 0) - ENTITY_RGB.g) <= CHANNEL_TOLERANCE) lowest = y;
-      }
-    }
+    const region = drawnRegion(frame);
+    expect(region.count, 'nothing was drawn after rotation').toBeGreaterThan(0);
+
+    // Centred, not merely present. A clipped scene jammed into a corner reaches
+    // further down the frame than a correct one does.
+    const centreX = (region.minX + region.maxX) / 2 / frame.width;
+    const centreY = (region.minY + region.maxY) / 2 / frame.height;
+    const where = `centre (${centreX.toFixed(2)}, ${centreY.toFixed(2)})`;
+    expect(centreX, `the scene is not horizontally centred after rotation — ${where}`).toBeCloseTo(
+      0.5,
+      1,
+    );
+    expect(centreY, `the scene is not vertically centred after rotation — ${where}`).toBeCloseTo(
+      0.5,
+      1,
+    );
+
+    // And none of it is clipped away: the same derived coverage as upright.
+    const coverage = region.count / (frame.width * frame.height);
+    const expected = expectedCoverage(REFERENCE_2D_ENTITY_COUNT, frame.width, frame.height);
     expect(
-      lowest / frame.height,
-      'the scene does not reach the lower half of the rotated viewport',
-    ).toBeGreaterThan(0.5);
+      coverage / expected,
+      `rotation lost content: ${(coverage * 100).toFixed(3)}% against ` +
+        `${(expected * 100).toFixed(3)}% expected`,
+    ).toBeGreaterThan(MIN_COVERAGE_RATIO);
+  });
+
+  test('keeps a square sprite square after rotation', async ({ page, profile }) => {
+    // `resize` calls `frameCamera` because the aspect correction is right once
+    // and wrong after every rotation. Deleting that call left all fifteen
+    // rotation assertions passing at pass 2: the square-sprite test never
+    // rotates, and the rotation test never measured aspect.
+    await startPlaying(page, 1);
+    await page.setViewportSize({ width: profile.viewport.height, height: profile.viewport.width });
+    await page.waitForTimeout(500);
+
+    const frame = await captureScreenshot(page);
+    const region = drawnRegion(frame);
+    expect(region.count, 'no sprite was found after rotation').toBeGreaterThan(0);
+    const drawnWidth = region.maxX - region.minX + 1;
+    const drawnHeight = region.maxY - region.minY + 1;
+    expect(
+      Math.abs(drawnWidth - drawnHeight),
+      `${profile.label} drew a square sprite as ${String(drawnWidth)}x${String(drawnHeight)}px ` +
+        'after rotation, so the camera was not reframed',
+    ).toBeLessThanOrEqual(2);
   });
 });
 
@@ -234,5 +451,25 @@ test.describe('renderer parity', () => {
     expect(report.ok, 'parity must not be ok while a backend is unmeasured').toBe(false);
     expect(report.deferredTo).toBe(WEBGPU_PARITY_GAP);
     expect(formatParityReport(report)).toContain('PARITY NOT ESTABLISHED');
+
+    // The negative control, and the reason this test is worth running at all.
+    //
+    // The two captures above are byte-identical — 0 of 1,296,000 pixels differ,
+    // mean SSIM exactly 1.00000 — so `expect(comparison.ok).toBe(true)` is
+    // `X === X`. Visual QA neutered `compareImages` to `ok: true` at pass 2 and
+    // this whole spec stayed green. A comparator that cannot be observed to
+    // fail is not being exercised, whatever the header says.
+    //
+    // So the same comparator, on the same real capture, against a copy with one
+    // band of pixels moved. If this passes, the comparison above proved nothing.
+    const damaged = perturb(second);
+    const control = compareImages(first, damaged, PARITY_THRESHOLDS);
+    expect(
+      control.ok,
+      'the comparator accepted a visibly different frame, so the comparison above is vacuous',
+    ).toBe(false);
+    expect(judgeParity({ webgl2: { ok: control.ok, detail: 'planted' } }).legs[0]?.status).toBe(
+      'violated',
+    );
   });
 });

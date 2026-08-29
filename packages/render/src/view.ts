@@ -56,7 +56,15 @@ export function frustumFor(width: number, height: number): { x: number; y: numbe
     ? { x: VIEW_EXTENT * aspect, y: VIEW_EXTENT }
     : { x: VIEW_EXTENT, y: VIEW_EXTENT / aspect };
 }
-const QUAD_SIZE = 4;
+/**
+ * Side of one entity's quad, in world units.
+ *
+ * Exported so a pixel assertion can be *derived* from the scene rather than
+ * chosen. The coverage floor in `tests/e2e/render.spec.ts` was 0.5% against a
+ * scene that actually draws 7.5%, so 87% of the sprites could vanish before it
+ * fired; with this and {@link VIEW_EXTENT} the expected coverage is arithmetic.
+ */
+export const QUAD_SIZE = 4;
 const BACKGROUND = 0x0b0d10;
 const ENTITY_COLOR = 0x6fd3c7;
 const CAMERA_NEAR = 0;

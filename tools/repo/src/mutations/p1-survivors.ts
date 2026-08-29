@@ -27,6 +27,54 @@ import type { Mutation } from '../mutations.ts';
  */
 export const P1_SURVIVORS: readonly Mutation[] = [
   {
+    id: 'render.resize.dead',
+    file: 'packages/render/src/view.ts',
+    find: '      renderer.setSize(width, height);',
+    replace: '      if (width < 0 && height < 0) renderer.setSize(width, height);',
+    breaks:
+      'Rotation. The canvas keeps its pre-rotation size, so the scene is ' +
+      'clipped into a corner — phone coverage 4.90% to 2.08%. The old ' +
+      'assertion ("content reaches the lower half") was satisfied *harder* by ' +
+      'this defect than by the fix, at 0.959 against 0.787.',
+    suite: 'e2e',
+    expect: 'killed',
+  },
+  {
+    id: 'render.sprites.flattened',
+    file: 'packages/render/src/view.ts',
+    find: '        mesh.position.set(x, y, 0);',
+    replace: '        mesh.position.set(x, 0, 0);',
+    breaks:
+      'The scene. Every sprite collapses onto one horizontal bar through the ' +
+      'origin, which cleared a 0.5% coverage floor and cleared "reaches past ' +
+      'the middle" by three thousandths.',
+    suite: 'e2e',
+    expect: 'killed',
+  },
+  {
+    id: 'render.sprites.mostlyHidden',
+    file: 'packages/render/src/view.ts',
+    find: '        mesh.visible = true;',
+    replace: '        mesh.visible = index < 50;',
+    breaks:
+      '350 of 400 sprites. The pool length is untouched, so the mesh-count ' +
+      'cross-check is satisfied; only measured coverage can see it.',
+    suite: 'e2e',
+    expect: 'killed',
+  },
+  {
+    id: 'audit.compare.alwaysOk',
+    file: 'tools/audit/src/image/compare.ts',
+    find: '    ok: failures.length === 0,',
+    replace: '    ok: true,',
+    breaks:
+      'Every image comparison. The parity spec could not see it, because it ' +
+      'compared a frame with itself: 0 of 1,296,000 pixels differ and mean ' +
+      'SSIM is exactly 1, so its assertion was X === X.',
+    suite: 'e2e',
+    expect: 'killed',
+  },
+  {
     id: 'audit.frames.dropPresent',
     file: 'tools/audit/src/budgets/frames.ts',
     find: '  const perUpdate = sorted(frames.map((frame) => frame.updateMs + frame.presentMs));',
