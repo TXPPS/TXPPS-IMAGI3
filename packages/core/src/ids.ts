@@ -79,7 +79,13 @@ export function isId(value: string, kind: IdKind): boolean {
   return ID_PATTERN.test(value) && value.startsWith(`${ID_PREFIX[kind]}${SEPARATOR}`);
 }
 
-/** Whether a string is shaped like an id of any kind. */
-export function isAnyId(value: string): boolean {
-  return ID_PATTERN.test(value);
-}
+// `isAnyId` was here: `ID_PATTERN.test(value)`, exported, with zero callers and
+// zero tests. The first enumerated mutant sweep produced three survivors from
+// it, and they were not coverage holes — an export nothing calls has no
+// behaviour to observe, so no assertion can be written that is not simply a
+// second copy of its body.
+//
+// Deleted rather than tested, which is the rule this file follows now: an
+// unused export is either load-bearing and has a caller, or it is not and has
+// no business being enumerated forever. `isId` covers the case anyone actually
+// needs, with the kind checked. If a use appears, it comes back with that use.

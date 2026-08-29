@@ -73,8 +73,12 @@ jobs:
       # about detectors. The unit subset runs on every commit; the e2e subset is
       # a phase-gate step because it needs a browser. A survivor is a coverage
       # hole and fails the build. See docs/BUGS.md RC-0009 and RC-0015.
+      # The positive control is no longer a flag: it runs in every sweep. It was
+      # opt-in until the P1 gate, which meant the runs that mattered carried no
+      # evidence that a survivor was reportable — and none was, because the kill
+      # signal was the sweep's own anchor test.
       - name: Mutation sweep (unit)
-        run: pnpm mutation:sweep -- --control
+        run: pnpm mutation:sweep
 
       - name: Build
         run: pnpm build
