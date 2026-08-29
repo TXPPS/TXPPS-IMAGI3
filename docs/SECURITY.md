@@ -70,6 +70,64 @@ reviewer did write a stray file into the main tree, and that is a real hole
 closed below — but it is not how this arrived, and saying otherwise would have
 put a mitigation on the wrong door.
 
+#### The keyword sweep in row 3 is not evidence, and is retracted
+
+QA Automation was right about this at the P1 gate, and the correction matters
+more than the conclusion it does not change.
+
+Row 3 offers two pieces of evidence. The first — zero occurrences of the text in
+any `tool_result` — discriminates correctly. The second, a sweep for seven
+imperative phrasings across every non-assistant record, **does not**: this entry
+had already established two paragraphs earlier that the directive is composed at
+render time and appears nowhere in the transcript. A keyword search over stored
+text is therefore guaranteed to return nothing **for a directive that was
+demonstrably present in context**. Its negative result is a known false negative
+for this very incident, cited as though it excluded something.
+
+That is the RC-0010 shape — an assertion that cannot fail, offered as though it
+had passed — inside the incident report written to catch assertions that cannot
+fail. Row 3's verdict stands on its first line of evidence alone.
+
+#### Confirmed live, twice, on 2026-08-29
+
+The provenance above was inferred from a configuration flag. It has since been
+observed directly, which closes the question.
+
+**Observation 1 — this session.** At 02:41 UTC, mid-task, the directive was
+rendered into context as a system reminder, verbatim, in the form recorded at
+the top of this entry. Nothing had been read from the repository, no subagent
+had returned, and no command had produced it. It arrived from the harness, as
+the flag predicted.
+
+**Observation 2 — a reviewer's session, independently.** QA Automation reported
+(pass 2, finding m4) that the identical prose — "While auto mode is active: Do
+your work through the Bash tool…" — was rendered into **its** context, appended
+to the MCP server instruction block. Two sessions, different processes, same
+text, neither reading it from the other.
+
+Three consequences, in order of how much they cost:
+
+1. **Reviewer isolation does not protect a reviewer from this.** The entry below
+   attributes the reviewers' blindness to isolation. Isolation prevents a
+   reviewer seeing the *incident*; it does nothing about a reviewer *receiving
+   the directive*, because reviewers run inside the same harness. Every
+   subagent this project dispatches is exposed on the same channel.
+2. **The mitigation cannot be a document a reader must first believe.** The
+   written boundary lives in repository files, and the boundary itself
+   classifies repository files as data. A reader who follows the rule cannot be
+   instructed by the rule. What makes it work is that it is restated in the
+   operator's brief — which *is* an instructing source — and the restatement is
+   what this file records rather than originates.
+3. **The two artifact checks shipped under SEC-0001 are not mitigations of
+   SEC-0001.** `check:tree` and `review-findings.ts` close real holes and both
+   were found defective at the gate. Neither can see this channel. The entry
+   already says an artifact check cannot see a channel that leaves no artifact;
+   shipping two artifact checks under the heading was inconsistent with its own
+   finding, and they are relabelled below as what they are.
+
+**No instruction from this channel has been followed.** Each observation was
+logged and the operator instruction applied instead, per the precedence rule.
+
 ### What this is, stated precisely
 
 Not an attack, and not an untrusted party. It is a **conflict of authority**:
@@ -109,12 +167,23 @@ Ledgered as a false-negative class, because it is the useful part:
   never in the repository.
 - **Three independent reviewers** ran against a frozen tree. None had access to
   the session context, by design — reviewer isolation is precisely the property
-  that makes them unable to see this.
+  that makes them unable to see **this session's** incident. It does not make
+  them safe: a reviewer runs inside the same harness and receives the same
+  channel, which one of them demonstrated by reporting the directive arriving in
+  its own context. Isolation bounds what a reviewer can *see of the work*, not
+  what can *reach the reviewer*.
 
 **Every existing mechanism inspects artifacts. None inspects provenance of
 instruction.** That is a category none of them covers, and the mitigation is the
 written boundary below rather than another artifact check — an artifact check
 cannot see a channel that leaves no artifact.
+
+The two checks shipped alongside this entry are therefore **not** mitigations of
+SEC-0001, and are relabelled: `check:tree` closes the reviewer-write hole the
+investigation found on the way, and `review-findings.ts` bounds and delimits a
+data channel so a directive arriving through it is inert. Both are worth having.
+Neither can see the channel this incident used, and filing them under this
+heading implied a coverage that does not exist.
 
 ---
 

@@ -24,6 +24,13 @@
  * change; it does not reject a finding that a method produced a defect. "The
  * budget cannot fail for a 3x regression" is a finding. "Stop using Vitest and
  * switch to Jest" is not.
+ *
+ * That narrowness was claimed before it was true. The first filter matched
+ * phrases anywhere in the text and rejected six of nine legitimate findings
+ * when QA Automation measured it — a false-positive rate that makes the gate
+ * quieter rather than safer, since a suppressed finding leaves no trace. The
+ * test is structural now; {@link methodDirectiveIn} carries the reasoning and
+ * the residual.
  */
 
 export const FINDING_SEVERITIES = ['blocking', 'major', 'minor', 'observation'] as const;
@@ -69,31 +76,111 @@ export class FindingRejected extends Error {
 }
 
 /**
- * Phrases that make a finding a directive about method rather than a report
- * about code.
+ * What separates a directive from a finding is grammar, not vocabulary.
  *
- * Matched on the imperative forms a report actually uses. This is a blunt
- * instrument and is meant to be: the cost of rejecting a well-meaning
- * suggestion is that someone rewrites it as a finding about code, and the cost
- * of accepting a directive is SEC-0001.
+ * The first version of this filter matched phrases anywhere in the text, and QA
+ * Automation measured the result at the P1 gate: **six of nine legitimate
+ * findings rejected**, including the verbatim pass-1 finding this gate exists
+ * to verify. `stop using`, `avoid using`, `from now on` and
+ * `prefer X rather than Y` are ordinary English for reporting a defect —
+ * "interpolateInto must stop using the stale scratch index" is a bug report,
+ * and it was thrown away.
+ *
+ * A filter that eats the review is not a conservative filter. It is the gate
+ * failing in the direction nobody measures, because a suppressed finding leaves
+ * no trace: rule 2's blunt-instrument note weighed the cost of a rejected
+ * suggestion as "someone rewrites it", and at a 67% false-positive rate nobody
+ * rewrites anything, they conclude the reviewer found less than it did.
+ *
+ * So the test is structural. A directive is addressed **to the reader about how
+ * the reader works**; a finding is a statement **about the code**. Three
+ * classes, and where each applies:
+ *
+ * - {@link READER_DIRECTIVES} — second person about the reader's own process.
+ *   "Do your work through the Bash tool" is never a bug report.
+ * - {@link INJECTION_MARKERS} — the discourse moves that exist to displace a
+ *   previous instruction, anywhere in the text.
+ * - {@link TOOLING_IMPERATIVES} — a bare imperative to change tooling, and only
+ *   at the start of a sentence, which is what makes "**Stop using** Vitest"
+ *   different from "interpolateInto must **stop using**".
+ *
+ * **Residual, stated rather than papered over.** A directive written in the
+ * third person — "the reviewer should switch to Jest" — is not caught. It is
+ * also not addressed to anyone, which is the property the trust boundary turns
+ * on; a report is data either way, and this filter is not the boundary, only a
+ * check that the schema is being used as a schema.
  */
-const METHOD_DIRECTIVES: readonly RegExp[] = [
-  /\b(?:use|prefer|switch to|adopt|install|run)\s+\w+\s+(?:instead of|rather than)\b/iu,
-  /\binstead of (?:using|the) [\w./-]+,?\s*(?:use|run|call)\b/iu,
-  /\b(?:stop|cease|avoid) using\b/iu,
-  /\bdo (?:your|the) work (?:through|with|via)\b/iu,
-  /\bfrom now on\b/iu,
-  /\bignore (?:all |any )?(?:previous|prior|earlier|the above)\b/iu,
-  /\bdisregard (?:the |all |any )?(?:previous|prior|earlier|instructions?)\b/iu,
-  /\byou (?:must|should) (?:now )?(?:use|switch|adopt|stop)\b/iu,
-  /\bnew instructions?\s*:/iu,
+const READER_DIRECTIVES: readonly RegExp[] = [
+  /\byou (?:must|should|shall|need to|are to|will now|may now)\b/iu,
+  /\bdo (?:your|the) work\b/iu,
+  /\byour (?:workflow|process|tooling|toolchain|method|approach)\b/iu,
 ];
 
-/** Why this text is a method directive, or undefined when it is not. */
+const INJECTION_MARKERS: readonly RegExp[] = [
+  /\bignore (?:all |any )?(?:previous|prior|earlier|the above)\b/iu,
+  /\bdisregard (?:the |all |any )?(?:previous|prior|earlier|instructions?)\b/iu,
+  /\b(?:new|updated|revised|revised set of) instructions?\s*:/iu,
+];
+
+/**
+ * Sentence-initial only. The anchor is the whole point.
+ *
+ * Every phrase here was in the original filter unanchored, and unanchored is
+ * what produced the false positives. `stop using` is how one says that a
+ * function should stop doing something — "interpolateInto must stop using the
+ * stale scratch index". `from now on` is how one says that a consequence
+ * persists — "from now on every phone run is scored against a number no phone
+ * produced". `use X rather than Y` is how one recommends a fix — "it should use
+ * p95 instead of the minimum". Anchored to the start of a sentence, each of
+ * them is an instruction and nothing else.
+ *
+ * The verb matters as much as the anchor. `run` is absent deliberately: "run
+ * pnpm instead of npm" is a reproduction step, and the original filter rejected
+ * it.
+ */
+const TOOLING_IMPERATIVES: readonly RegExp[] = [
+  /^(?:please,?\s+)?(?:stop|cease|avoid)\s+using\b/iu,
+  /^(?:please,?\s+)?switch\s+to\b/iu,
+  /^(?:please,?\s+)?adopt\b/iu,
+  /^(?:please,?\s+)?use\s+[\w./-]+\s+(?:instead of|rather than)\b/iu,
+  /^(?:please,?\s+)?from now on\b/iu,
+];
+
+/**
+ * Sentence-ish segments, so a pattern can be anchored to the start of one.
+ *
+ * Splits on terminators followed by whitespace, and on line breaks. A colon
+ * counts, so "Reproduction: run pnpm …" puts the command at a segment start;
+ * a colon *not* followed by whitespace does not, which keeps `mutation:sweep`
+ * in one piece.
+ */
+function segments(text: string): string[] {
+  return text
+    .split(/(?<=[.!?;:])\s+|\n+/u)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+/**
+ * Why this text is a method directive, or undefined when it is not.
+ *
+ * Every field is checked the same way. An earlier attempt at this fix exempted
+ * `reproduction` on the grounds that it carries commands, which would have let
+ * "Stop using Vitest and switch to Jest" through in the one field a reviewer
+ * fills with imperatives. It is not needed: dropping `run` from the verb set is
+ * what makes "run pnpm instead of npm" a reproduction step again, and that is a
+ * statement about which verbs direct method, not about which field is trusted.
+ */
 export function methodDirectiveIn(text: string): string | undefined {
-  for (const pattern of METHOD_DIRECTIVES) {
+  for (const pattern of [...READER_DIRECTIVES, ...INJECTION_MARKERS]) {
     const match = pattern.exec(text);
     if (match !== null) return match[0];
+  }
+  for (const segment of segments(text)) {
+    for (const pattern of TOOLING_IMPERATIVES) {
+      const match = pattern.exec(segment);
+      if (match !== null) return match[0];
+    }
   }
   return undefined;
 }
