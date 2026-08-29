@@ -147,7 +147,9 @@ describe('findings that direct a change of method', () => {
     // imperative by contract; scanning it like prose is a category error.
     expect(() =>
       ingestFinding(
-        finding({ reproduction: 'Reproduction: run pnpm instead of npm, then pnpm mutation:sweep.' }),
+        finding({
+          reproduction: 'Reproduction: run pnpm instead of npm, then pnpm mutation:sweep.',
+        }),
       ),
     ).not.toThrow();
   });

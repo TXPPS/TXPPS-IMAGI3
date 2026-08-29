@@ -188,7 +188,10 @@ describe('forms the parser used to miss', () => {
     // A basename in a table cell. This is most of the ledger's coverage: the
     // table whose rows cite commits as evidence was entirely outside it.
     const row = `| Budget bounds | \`budgets/check.ts\` | x | \`detectors.test.ts\` (\`${sha}\`) |`;
-    const tracked = ['tools/audit/test/selftest/detectors.test.ts', 'tools/audit/src/budgets/check.ts'];
+    const tracked = [
+      'tools/audit/test/selftest/detectors.test.ts',
+      'tools/audit/src/budgets/check.ts',
+    ];
     const claims = parseClaims(row, 'd', (path) => resolveTrackedPath(path, tracked));
     expect(claims.map((claim) => claim.path)).toContain(
       'tools/audit/test/selftest/detectors.test.ts',
@@ -197,7 +200,9 @@ describe('forms the parser used to miss', () => {
 
   it('does not read an all-digit CI run id as a commit', () => {
     // `GitHub Actions run 33191437089` sits next to paths in the gate tables.
-    expect(parseClaims('Actions run 33191437089 built packages/core/src/graph.ts', 'd')).toEqual([]);
+    expect(parseClaims('Actions run 33191437089 built packages/core/src/graph.ts', 'd')).toEqual(
+      [],
+    );
   });
 
   it('does read an all-digit commit, which this history has', () => {
@@ -238,7 +243,9 @@ describe('resolveTrackedPath', () => {
   });
 
   it('resolves a partial path that is unique', () => {
-    expect(resolveTrackedPath('budgets/check.ts', tracked)).toBe('tools/audit/src/budgets/check.ts');
+    expect(resolveTrackedPath('budgets/check.ts', tracked)).toBe(
+      'tools/audit/src/budgets/check.ts',
+    );
   });
 
   it('refuses an ambiguous citation rather than guessing', () => {

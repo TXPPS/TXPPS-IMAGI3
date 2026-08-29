@@ -350,7 +350,8 @@ const SCENARIOS: readonly DetectorScenario[] = [
     detector: 'engine frame budget',
     plantedDefect: 'draw submission twice as expensive, which is 88% of the statistic',
     clean: () => cpuFrameMsFrom(frameSamples()).cpuMs <= ENGINE_FRAME_CEILING_MS,
-    planted: () => cpuFrameMsFrom(frameSamples({ presentCost: 2 })).cpuMs <= ENGINE_FRAME_CEILING_MS,
+    planted: () =>
+      cpuFrameMsFrom(frameSamples({ presentCost: 2 })).cpuMs <= ENGINE_FRAME_CEILING_MS,
   },
   {
     /**

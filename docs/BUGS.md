@@ -621,7 +621,7 @@ What this establishes, and it is the useful part:
   violations are the demonstration.
 - **Writing a rule down does not create adherence to it**, including for the
   author on the same day. The only mechanisms with teeth here are the ones that
-  make a wrong edit *fail* — the read-back in the edit tools, the anchored
+  make a wrong edit _fail_ — the read-back in the edit tools, the anchored
   replacements in `verified-edit.ts` — rather than the ones that describe what
   should have been done.
 

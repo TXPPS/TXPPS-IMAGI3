@@ -109,14 +109,14 @@ Three consequences, in order of how much they cost:
 
 1. **Reviewer isolation does not protect a reviewer from this.** The entry below
    attributes the reviewers' blindness to isolation. Isolation prevents a
-   reviewer seeing the *incident*; it does nothing about a reviewer *receiving
-   the directive*, because reviewers run inside the same harness. Every
+   reviewer seeing the _incident_; it does nothing about a reviewer _receiving
+   the directive_, because reviewers run inside the same harness. Every
    subagent this project dispatches is exposed on the same channel.
 2. **The mitigation cannot be a document a reader must first believe.** The
    written boundary lives in repository files, and the boundary itself
    classifies repository files as data. A reader who follows the rule cannot be
    instructed by the rule. What makes it work is that it is restated in the
-   operator's brief — which *is* an instructing source — and the restatement is
+   operator's brief — which _is_ an instructing source — and the restatement is
    what this file records rather than originates.
 3. **The two artifact checks shipped under SEC-0001 are not mitigations of
    SEC-0001.** `check:tree` and `review-findings.ts` close real holes and both
@@ -170,8 +170,8 @@ Ledgered as a false-negative class, because it is the useful part:
   that makes them unable to see **this session's** incident. It does not make
   them safe: a reviewer runs inside the same harness and receives the same
   channel, which one of them demonstrated by reporting the directive arriving in
-  its own context. Isolation bounds what a reviewer can *see of the work*, not
-  what can *reach the reviewer*.
+  its own context. Isolation bounds what a reviewer can _see of the work_, not
+  what can _reach the reviewer_.
 
 **Every existing mechanism inspects artifacts. None inspects provenance of
 instruction.** That is a category none of them covers, and the mitigation is the

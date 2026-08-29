@@ -157,10 +157,7 @@ describe('splitBundle', () => {
 
   it('faults at the floor rather than merely below it', () => {
     // The mutation: MIN_RUNTIME_SHARE -> 0, which accepts any split at all.
-    const half = [
-      asset('assets/imagi3-runtime-abc.js', 4000),
-      asset('assets/index-def.js', 6000),
-    ];
+    const half = [asset('assets/imagi3-runtime-abc.js', 4000), asset('assets/index-def.js', 6000)];
     expect(splitBundle(half, 'imagi3-runtime').fault).toContain('% of the build');
     expect(splitBundle(half, 'imagi3-runtime', 0.3).fault).toBeUndefined();
   });

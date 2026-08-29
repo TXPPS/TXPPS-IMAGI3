@@ -106,9 +106,9 @@ describe('findAssertions', () => {
   });
 
   it('still exempts a verb that is only inside quotes', () => {
-    expect(findAssertions('x.ts', ' * The comment said "the leg is wired" and it was not.')).toEqual(
-      [],
-    );
+    expect(
+      findAssertions('x.ts', ' * The comment said "the leg is wired" and it was not.'),
+    ).toEqual([]);
   });
 });
 

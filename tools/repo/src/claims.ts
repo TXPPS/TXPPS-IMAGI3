@@ -198,10 +198,7 @@ export type PathResolver = (path: string) => string | undefined;
  * guess — a claim about the wrong file is worse than an unchecked sentence, and
  * the fix is to write one more path segment.
  */
-export function resolveTrackedPath(
-  path: string,
-  tracked: readonly string[],
-): string | undefined {
+export function resolveTrackedPath(path: string, tracked: readonly string[]): string | undefined {
   if (tracked.includes(path)) return path;
   const suffix = `/${path}`;
   const matches = tracked.filter((candidate) => candidate.endsWith(suffix));

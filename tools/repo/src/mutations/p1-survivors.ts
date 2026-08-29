@@ -236,7 +236,8 @@ export const P1_SURVIVORS: readonly Mutation[] = [
     id: 'runtime.bounds.unbounded',
     file: 'packages/runtime/src/simulation.ts',
     find: 'export const DEFAULT_BOUNDS: Bounds = { minX: -100, minY: -100, maxX: 100, maxY: 100 };',
-    replace: 'export const DEFAULT_BOUNDS: Bounds = { minX: -1e9, minY: -1e9, maxX: 1e9, maxY: 1e9 };',
+    replace:
+      'export const DEFAULT_BOUNDS: Bounds = { minX: -1e9, minY: -1e9, maxX: 1e9, maxY: 1e9 };',
     breaks: 'The walls. Nothing ever reaches one, so collision is unreachable.',
     suite: 'unit',
     expect: 'killed',
@@ -253,8 +254,8 @@ export const P1_SURVIVORS: readonly Mutation[] = [
   {
     id: 'runtime.emptyInput.notNeutral',
     file: 'packages/runtime/src/input.ts',
-    find: "export const EMPTY_INPUT: InputFrame = { axisX: 0, axisY: 0, pressed: [] };",
-    replace: "export const EMPTY_INPUT: InputFrame = { axisX: 1, axisY: 0, pressed: [] };",
+    find: 'export const EMPTY_INPUT: InputFrame = { axisX: 0, axisY: 0, pressed: [] };',
+    replace: 'export const EMPTY_INPUT: InputFrame = { axisX: 1, axisY: 0, pressed: [] };',
     breaks: 'The neutral frame. A run nobody touched the controls in accelerates.',
     suite: 'unit',
     expect: 'killed',

@@ -57,9 +57,7 @@ function parseArgs(argv: readonly string[]): Options {
  */
 function suiteFails(repoRoot: string, suite: Mutation['suite']): boolean {
   const command =
-    suite === 'e2e'
-      ? ['exec', 'playwright', 'test', '--workers=1']
-      : ['vitest', 'run', '--silent'];
+    suite === 'e2e' ? ['exec', 'playwright', 'test', '--workers=1'] : ['vitest', 'run', '--silent'];
   try {
     execFileSync('pnpm', command, { cwd: repoRoot, stdio: 'ignore' });
     return false;

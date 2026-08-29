@@ -3,14 +3,21 @@
 <!-- Rewrite this file after every completed task. Prune aggressively. -->
 
 **Phase:** P1
-**Phase status:** P0 and P1-PRE closed. **P1 is OPEN and unsigned.** All three roles returned FAIL on pass 1 at `24ea825` — 22 blocking findings between them, all addressed. S4-S7 landed after: a security incident record, mutation-first coverage, an assertion checker, and the shell-edit ban extended to tool use. Pass 2 has not been reviewed. No role has signed, so P1 is not closed.
+**Phase status:** P0 and P1-PRE closed. **P1 is OPEN and unsigned.** All three roles returned FAIL on pass 1 at `24ea825` (22 blocking) and **all three returned FAIL again on pass 2 at `8798779`** — 17 blocking and 16 major between them. Every pass-2 finding is now addressed; a pass 3 has not been run. No role has signed, so P1 is not closed.
 
 <!-- The **Phase:** line above is a machine contract: a test requires it to
      match budgets.json currentPhase, so it must be one of the brief's phase
      ids. P1-PRE is a blocking sub-gate on the way to P1, not a phase, so it is
      recorded on the status line instead. -->
 
-**Tree status:** green — `pnpm sweep` passes end to end. Counts are in the sweep output, not here; this line said "616 unit tests, 51 E2E" while the tree ran 778 and 66, and two reviewers had to correct it.
+**Tree status:** green on this host — unit suite, E2E suite (twice, deterministic), mutation sweep, claims, assertions and the budget gate. Counts are in the sweep output, not here; this line said "616 unit tests, 51 E2E" while the tree ran 778 and 66, and two reviewers had to correct it.
+
+It said "`pnpm sweep` passes end to end" at pass 2 when it did not: six E2E tests
+failed under the load the repo's own three-reviewer procedure creates, because
+the throttle probe reported host contention as missing throttling. Fixed, but
+the lesson is the line itself — a status claim about a command nobody re-ran
+under the conditions the project actually runs it in. "Green on this host" is
+what this line can honestly say.
 
 ## In flight
 
@@ -28,6 +35,8 @@ this project made that measurement contradicted:
 - **SEC-0001** — a session mode directed edits be made the way S2 forbids. Not
   an injection: the provenance is a harness `auto_mode` attachment present 0.4s
   after session start, which rules out all three channels the report proposed.
+  Since confirmed by direct observation, in this session and independently in a
+  reviewer's.
 
 **Three new gates, and what each is for.** `pnpm mutation:sweep` neuters each
 load-bearing export and requires a test to fail — it found two holes the guard
@@ -35,6 +44,28 @@ audit could not have (RC-0015). `pnpm verify:assertions` fails a comment that
 claims a runtime property without naming something checkable, and found a live
 falsehood on its first run. `pnpm check:tree` refuses to sweep a tree with
 unaccounted files in it.
+
+**And what pass 2 found about those gates, which is the part worth reading.**
+Every one of them was defective in the direction that made it look like it
+worked:
+
+- **The mutation sweep could not report a survivor.** Its kill signal is the
+  suite's exit code, and its own anchor test read the mutated file from the
+  working tree — so every unit mutation reported `killed` whether or not
+  anything observed it. The single entry excluded from that mechanism was the
+  positive control, which is exactly why the sweep appeared sound.
+- **`verify:assertions` accepted `test: e`**, because a reference was matched as
+  a substring against whole file contents.
+- **`check:tree` reported TREE CLEAN** with a script in `test-results/`, because
+  `git status` honours `.gitignore`.
+- **`review-findings.ts` rejected six of nine legitimate findings**, including
+  the verbatim pass-1 finding the gate exists to verify.
+- **The claims ledger verified one of thirty** commit references and could not
+  parse the citation style its own gate tables use.
+
+The generalisation, and the reason to expect more of it: a guard written by the
+same person, in the same pass, as the thing it guards tends to share its blind
+spot. Only an adversarial reader with a machine found these.
 
 ## Next 3 actions
 

@@ -83,9 +83,9 @@ one:
 
 The differing-pixel figure for repainting every sprite is 7.43 / 7.93 / 4.85%,
 not 11.9%. It could not have been 11.9% at any commit since the aspect fix: the
-ratio for a full sprite repaint *is* the sprite coverage, and coverage is 7.47 /
+ratio for a full sprite repaint _is_ the sprite coverage, and coverage is 7.47 /
 7.97 / 4.83%. The 11.9% describes the **pre-aspect-fix** geometry, where a
-square frustum made a quad draw 4/220 of *both* axes on every profile — about
+square frustum made a quad draw 4/220 of _both_ axes on every profile — about
 13.2% before overlap. The table was measured on the build that fixed GAP-006 and
 never re-measured after it.
 

@@ -44,11 +44,15 @@ function makeResolver(repoRoot: string, files: readonly string[]): (ref: string)
   let jobNames: string[] | undefined;
 
   const titles = (): string[] => {
-    testTitles ??= files.filter((path) => TEST_FILE.test(path)).flatMap((p) => testTitlesIn(read(p)));
+    testTitles ??= files
+      .filter((path) => TEST_FILE.test(path))
+      .flatMap((p) => testTitlesIn(read(p)));
     return testTitles;
   };
   const jobs = (): string[] => {
-    jobNames ??= files.filter((path) => WORKFLOW_FILE.test(path)).flatMap((p) => jobNamesIn(read(p)));
+    jobNames ??= files
+      .filter((path) => WORKFLOW_FILE.test(path))
+      .flatMap((p) => jobNamesIn(read(p)));
     return jobNames;
   };
 

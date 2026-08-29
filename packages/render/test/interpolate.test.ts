@@ -129,10 +129,12 @@ describe('interpolateInto across frames', () => {
 
   it('forgets entities that have left the scene', () => {
     const scratch = createInterpolationScratch();
-    draw(snapshot({ id: 'a', x: 0, y: 0 }, { id: 'b', x: 100, y: 0 }), snapshot(
-      { id: 'a', x: 10, y: 0 },
-      { id: 'b', x: 110, y: 0 },
-    ), 0.5, scratch);
+    draw(
+      snapshot({ id: 'a', x: 0, y: 0 }, { id: 'b', x: 100, y: 0 }),
+      snapshot({ id: 'a', x: 10, y: 0 }, { id: 'b', x: 110, y: 0 }),
+      0.5,
+      scratch,
+    );
     expect(scratch.index.size).toBe(2);
 
     // Frame two: `b` is gone from both snapshots.
