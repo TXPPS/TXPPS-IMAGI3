@@ -187,7 +187,41 @@ function median(values: readonly number[]): number {
 }
 
 /**
- * One probe's slowdown: the median of its paired throttled-over-control ratios.
+ * How far above a run's fastest control leg a control sample may sit and still
+ * be counted.
+ *
+ * Pairing divides out load that lasts across a whole pair. It does nothing for
+ * load that arrives inside one — and that is not a corner case here. Running
+ * the three-reviewer procedure this repository prescribes puts three browser
+ * suites on four cores, and Performance measured control legs of 747ms, 268ms
+ * and 232ms against an uncontended ~100ms. The ratio collapsed towards 1 and
+ * the harness reported that CPU throttling had not taken effect. That was a
+ * misdiagnosis: throttling was working and the host was busy.
+ *
+ * The fastest control in a run is the best available estimate of the
+ * uncontended time, because contention can only slow a sample down. A control
+ * half again above that is a sample something else interfered with, and the
+ * pair it belongs to is dropped rather than averaged in.
+ */
+export const MAX_CONTROL_INFLATION = 1.5;
+
+/** Indices of pairs whose control leg shows no sign of contention. */
+export function cleanPairs(probe: ThrottleProbe): number[] {
+  const usable = probe.controlMs.filter((ms) => Number.isFinite(ms) && ms > 0);
+  if (usable.length === 0) return [];
+  const fastest = Math.min(...usable);
+  const indices: number[] = [];
+  for (let index = 0; index < probe.controlMs.length; index += 1) {
+    const control = probe.controlMs[index];
+    if (control === undefined || !Number.isFinite(control) || control <= 0) continue;
+    if (control > fastest * MAX_CONTROL_INFLATION) continue;
+    indices.push(index);
+  }
+  return indices;
+}
+
+/**
+ * One probe's slowdown: the median of its uncontended paired ratios.
  *
  * Pairwise, not pooled. Two reductions over pooled samples were considered and
  * both are worse. A minimum-over-minimum estimates each side's uncontended
@@ -198,17 +232,23 @@ function median(values: readonly number[]): number {
  * the argument that every influence depresses this quantity.
  *
  * Dividing samples that were taken back to back cancels whatever load was
- * present across both, which is the actual nuisance variable. The median over
- * those pairs then resists a single bad draw in either direction — the property
- * the cold-load spec reasoned its way to, applied one level down.
+ * present across both, which is the actual nuisance variable. Pairs whose
+ * control leg was *itself* contended are then discarded — see
+ * {@link MAX_CONTROL_INFLATION} — because such a pair is not a noisy
+ * measurement of the slowdown, it is a measurement of something else. The
+ * median over what remains resists a single bad draw in either direction.
  */
 export function probeRatio(probe: ThrottleProbe): number {
   if (probe.controlMs.length !== probe.throttledMs.length) return Number.NaN;
-  const pairs = probe.throttledMs.map((throttled, index) => {
+  const usable = cleanPairs(probe);
+  if (usable.length === 0) return Number.NaN;
+  const pairs = usable.map((index) => {
     const control = probe.controlMs[index];
-    return control === undefined || control <= 0 ? Number.NaN : throttled / control;
+    const throttled = probe.throttledMs[index];
+    if (control === undefined || throttled === undefined || control <= 0) return Number.NaN;
+    return throttled / control;
   });
-  return pairs.length === 0 ? Number.NaN : median(pairs);
+  return median(pairs);
 }
 
 /**

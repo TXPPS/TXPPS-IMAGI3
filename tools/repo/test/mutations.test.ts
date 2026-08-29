@@ -1,20 +1,44 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readCommitted } from '../src/git-blob.ts';
 import {
   CONTROL_MUTATION,
   MUTATIONS,
   formatMutationReport,
   judgeMutations,
   matchedExpectation,
+  mutationsForSuite,
   type Mutation,
   type MutationOutcome,
 } from '../src/mutations.ts';
 import { unguardedForControl } from '../src/unguarded.ts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+
+/**
+ * Anchors are checked against the commit, never against the working tree.
+ *
+ * This is the fix for the defect that made the whole sweep meaningless. The
+ * anchor test below reads every mutation's file; the sweep runs the suite *with
+ * a mutation applied*; and reading from disk therefore saw the mutated bytes,
+ * so the anchor was gone and this test failed. `suiteFails` reads the whole
+ * suite's exit code, so that failure was indistinguishable from a production
+ * test noticing the defect, and **every** unit mutation reported `killed`
+ * whether or not anything observed it. The sweep could not report a survivor
+ * except for the one mutation this test excluded, which is exactly why it
+ * looked as though it worked. QA Automation proved it at the P1 gate by
+ * neutering `DRAG_PER_SECOND`: the suite is green with no sweep entry for it
+ * and red once an entry exists, and the only failing file is this one.
+ *
+ * What is given up is narrow and covered: an anchor broken by an *uncommitted*
+ * edit is not seen here. `runMutation` checks the same anchor against the
+ * working tree at sweep time and throws, distinguishably from either verdict.
+ */
+function committedContents(path: string): string {
+  return readCommitted(REPO_ROOT, path);
+}
 
 function outcome(mutation: Mutation, killed: boolean): MutationOutcome {
   return { mutation, killed, detail: killed ? 'a test failed' : 'no test noticed' };
@@ -40,23 +64,20 @@ function fake(expect_: Mutation['expect']): Mutation {
  */
 describe('mutation anchors', () => {
   /**
-   * The control is excluded, and the reason is the interesting part.
+   * Every mutation, the control included.
    *
-   * Any test that *reads* a file is killed by that file's mutation — which is
-   * what you want for production code and fatal for a control, whose entire job
-   * is to survive. Including `CONTROL_MUTATION` here made it read as killed:
-   * with `return value;` in the file, the anchor `return value * 2;` is gone
-   * and this assertion fails.
-   *
-   * Nothing is lost. `runMutation` checks the same anchor at sweep time and
-   * throws — loudly, and distinguishably from either verdict — so the control's
-   * anchor is verified where verifying it does not destroy it.
+   * The control used to be excluded here, on the reasoning that a test which
+   * reads a file is killed by that file's mutation and a control must survive.
+   * The reasoning was right about the mechanism and wrong about the remedy: the
+   * mechanism was masking *every* mutation, and excluding one of them was what
+   * made the damage invisible. Reading from `HEAD` removes the mechanism, so the
+   * exclusion is no longer needed and the control's anchor is checked like any
+   * other.
    */
-  it.each(MUTATIONS.map((m) => [m.id, m] as const))(
+  it.each([...MUTATIONS, CONTROL_MUTATION].map((m) => [m.id, m] as const))(
     '%s anchors to exactly one place in its file',
     (_id, mutation) => {
-      const contents = readFileSync(join(REPO_ROOT, mutation.file), 'utf8');
-      const occurrences = contents.split(mutation.find).length - 1;
+      const occurrences = committedContents(mutation.file).split(mutation.find).length - 1;
       expect(occurrences, `${mutation.id}: the code moved; update the mutation`).toBe(1);
     },
   );
@@ -176,5 +197,28 @@ describe('the positive control', () => {
 
   it('expects to survive, so a clean sweep can still be shown to report one', () => {
     expect(CONTROL_MUTATION.expect).toBe('survives');
+  });
+
+  it.each(['unit', 'e2e', 'all'] as const)('runs in a %s sweep without a flag', (suite) => {
+    // It was behind `--control` until the P1 gate, so the runs that mattered
+    // carried no evidence the sweep could report a survivor — and it could not.
+    expect(mutationsForSuite(suite)).toContain(CONTROL_MUTATION);
+  });
+});
+
+describe('mutationsForSuite', () => {
+  it('selects only the named suite, plus the control', () => {
+    const unit = mutationsForSuite('unit');
+    expect(unit.filter((m) => m !== CONTROL_MUTATION).every((m) => m.suite === 'unit')).toBe(true);
+  });
+
+  it('selects every mutation for all', () => {
+    expect(mutationsForSuite('all')).toHaveLength(MUTATIONS.length + 1);
+  });
+
+  it('never returns an empty sweep for a suite that has mutations', () => {
+    // `judgeMutations([])` is ok by design, so a selector that silently matched
+    // nothing would report MUTATION SWEEP OK having run nothing at all.
+    expect(mutationsForSuite('e2e').length).toBeGreaterThan(1);
   });
 });

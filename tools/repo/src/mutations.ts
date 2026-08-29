@@ -139,6 +139,90 @@ const PROJECTION_AUDITS: readonly Mutation[] = [
 ];
 
 /** Load-bearing exports in core and runtime, one neutering mutation each. */
+/**
+ * The reference simulation's physics, which nothing observed until the P1 gate.
+ *
+ * QA Automation neutered sixteen load-bearing exports and the suite stayed
+ * green for all of them; six of those were these. The cause is structural and
+ * worth stating, because it generalises: **the determinism suite is invariant
+ * under every deterministic change to the physics.** It runs the simulation
+ * twice and compares, so drag, restitution, the world's walls and the control
+ * speed can all be neutered without moving it — two runs of the broken code
+ * agree exactly as well as two runs of the correct code.
+ *
+ * `packages/runtime/test/systems.test.ts` is the answer: each system reached
+ * through the dispatch table by the name the step loop uses, asserted on what
+ * it did, against literal expectations rather than against the constant being
+ * mutated.
+ */
+const SIMULATION_PHYSICS: readonly Mutation[] = [
+  {
+    id: 'runtime.drag.noop',
+    file: 'packages/runtime/src/simulation.ts',
+    find: '  const retained = DRAG_PER_SECOND ** stepSeconds;',
+    replace: '  const retained = 1;',
+    breaks: 'Drag entirely. Every entity coasts forever, and 969 tests passed.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'runtime.input.controlledGuard',
+    file: 'packages/runtime/src/simulation.ts',
+    find: '    if (!entity.controlled) continue;',
+    replace: '    if (false) continue;',
+    breaks: 'Every entity in the scene is driven by the player, not just theirs.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'runtime.restitution.inelastic',
+    file: 'packages/runtime/src/simulation.ts',
+    find: 'export const RESTITUTION = 0.8;',
+    replace: 'export const RESTITUTION = 0;',
+    breaks: 'Bounces. Everything that touches a wall stops dead against it.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'runtime.bounds.unbounded',
+    file: 'packages/runtime/src/simulation.ts',
+    find: 'export const DEFAULT_BOUNDS: Bounds = { minX: -100, minY: -100, maxX: 100, maxY: 100 };',
+    replace: 'export const DEFAULT_BOUNDS: Bounds = { minX: -1e9, minY: -1e9, maxX: 1e9, maxY: 1e9 };',
+    breaks: 'The walls. Nothing ever reaches one, so collision is unreachable.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'runtime.integrate.doubleStep',
+    file: 'packages/runtime/src/simulation.ts',
+    find: '    entity.x += entity.vx * stepSeconds;',
+    replace: '    entity.x += entity.vx * stepSeconds * 2;',
+    breaks: 'The relationship between velocity and time. Everything moves twice as fast.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'runtime.emptyInput.notNeutral',
+    file: 'packages/runtime/src/input.ts',
+    find: "export const EMPTY_INPUT: InputFrame = { axisX: 0, axisY: 0, pressed: [] };",
+    replace: "export const EMPTY_INPUT: InputFrame = { axisX: 1, axisY: 0, pressed: [] };",
+    breaks: 'The neutral frame. A run nobody touched the controls in accelerates.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+  {
+    id: 'runtime.systems.rewired',
+    file: 'packages/runtime/src/simulation.ts',
+    find: '  drag: applyDrag,\n  integrate,',
+    replace: '  drag: integrate,\n  integrate: applyDrag,',
+    breaks:
+      'Which function each name dispatches to. The observed system sequence is ' +
+      'unchanged and the world is not: hash 89f827c3 became 405759c4.',
+    suite: 'unit',
+    expect: 'killed',
+  },
+];
+
 const CORE_AND_RUNTIME: readonly Mutation[] = [
   {
     id: 'core.canonical.sortKeys',
@@ -290,6 +374,7 @@ const CORE_AND_RUNTIME: readonly Mutation[] = [
 export const MUTATIONS: readonly Mutation[] = [
   ...PROVEN,
   ...PROJECTION_AUDITS,
+  ...SIMULATION_PHYSICS,
   ...CORE_AND_RUNTIME,
 ];
 
@@ -310,6 +395,26 @@ export const CONTROL_MUTATION: Mutation = {
   suite: 'unit',
   expect: 'survives',
 };
+
+/**
+ * The mutations a sweep of this suite runs, always including the control.
+ *
+ * The control used to be opt-in behind a `--control` flag, which meant the runs
+ * that mattered — CI, and every run anyone did by habit — carried no evidence
+ * that the sweep could report a survivor at all. It could not: QA Automation
+ * showed at the P1 gate that the kill signal was the sweep's own anchor test,
+ * so every unit mutation read `killed` regardless, and the control was the one
+ * entry exempted from the masking mechanism, which is exactly why the sweep
+ * looked as though it worked. An opt-in positive control is a control nobody
+ * runs on the day it would have told them something.
+ *
+ * Lives here rather than in the CLI so it can be tested: the CLI assigns
+ * `process.exitCode` at import time and cannot be imported by a test.
+ */
+export function mutationsForSuite(suite: Mutation['suite'] | 'all'): Mutation[] {
+  const chosen = MUTATIONS.filter((m) => suite === 'all' || m.suite === suite);
+  return [...chosen, CONTROL_MUTATION];
+}
 
 export interface MutationOutcome {
   readonly mutation: Mutation;

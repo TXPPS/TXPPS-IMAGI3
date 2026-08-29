@@ -8,6 +8,7 @@ import {
   formatMutationReport,
   judgeMutations,
   matchedExpectation,
+  mutationsForSuite,
   type Mutation,
   type MutationOutcome,
 } from '../mutations.ts';
@@ -16,11 +17,12 @@ import { revertFailure } from '../tree-hygiene.ts';
 /**
  * Apply each mutation, run the suite, and require a test to fail.
  *
- * Usage: `pnpm mutation:sweep [--suite unit|e2e|all] [--control]`
+ * Usage: `pnpm mutation:sweep [--suite unit|e2e|all]`
  *
  * Defaults to the unit subset, which runs in a couple of minutes and is what a
  * per-commit job can afford. The `e2e` mutations need a browser and a build and
- * are run at the phase gate.
+ * are run at the phase gate. The positive control runs in every sweep and is
+ * not a flag — see {@link mutationsForSuite}.
  *
  * **Every mutation is reverted, including on crash.** The file is restored from
  * the bytes read before the edit, in a `finally`, and the tree is checked clean
@@ -33,24 +35,26 @@ const EXIT_ERROR = 2;
 
 interface Options {
   readonly suite: 'unit' | 'e2e' | 'all';
-  readonly includeControl: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Options {
   const suiteArg = argv[argv.indexOf('--suite') + 1];
   const suite = suiteArg === 'e2e' || suiteArg === 'all' ? suiteArg : 'unit';
-  return { suite, includeControl: argv.includes('--control') };
+  return { suite };
 }
 
-function selected(options: Options): Mutation[] {
-  const chosen = MUTATIONS.filter(
-    (m) => options.suite === 'all' || m.suite === options.suite,
-  ).slice();
-  if (options.includeControl) chosen.push(CONTROL_MUTATION);
-  return chosen;
-}
-
-/** Run the suite a mutation is visible to. Non-zero exit means a test failed. */
+/**
+ * Run the suite a mutation is visible to. Non-zero exit means a test failed.
+ *
+ * **The exit code is only a kill signal if no test in the suite reads the
+ * mutated source text.** One did: the sweep's own anchor test in
+ * `tools/repo/test/mutations.test.ts` read each mutation's file from the
+ * working tree, so applying any mutation deleted the anchor, failed that test,
+ * and produced a non-zero exit no matter what the production tests thought.
+ * Every unit mutation reported `killed`. The anchor test now reads from `HEAD`,
+ * which the sweep never writes to; the note there records why that is the fix
+ * rather than exempting a project from the run.
+ */
 function suiteFails(repoRoot: string, mutation: Mutation): boolean {
   const command =
     mutation.suite === 'e2e'
@@ -107,7 +111,7 @@ function mutatedFileState(repoRoot: string): string {
 function main(): number {
   const repoRoot = findRepoRoot();
   const options = parseArgs(process.argv.slice(2));
-  const mutations = selected(options);
+  const mutations = mutationsForSuite(options.suite);
   // Captured before anything is mutated. Comparing the end state against HEAD
   // instead would report every file that was already modified — which on the
   // first run of this tool was one, and looked exactly like a failed revert.

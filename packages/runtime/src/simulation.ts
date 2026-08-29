@@ -193,14 +193,33 @@ export const SYSTEM_ORDER = ['input', 'jitter', 'drag', 'integrate', 'collide'] 
 
 export type SystemName = (typeof SYSTEM_ORDER)[number];
 
-const SYSTEMS: Readonly<Record<SystemName, System>> = {
+/**
+ * What each name dispatches to.
+ *
+ * **Exported so it can be tested through, not merely read.** The observer below
+ * reports the loop variable, which is the *key* — so swapping two values here
+ * (`drag: integrate, integrate: applyDrag`) produces the identical observed
+ * sequence over a materially different world, and QA Automation demonstrated
+ * exactly that at the P1 gate with all 911 tests green. That is the same defect
+ * as reading `SYSTEM_ORDER` instead of the loop, one level further down: a
+ * guard on the label rather than on the behaviour.
+ *
+ * `packages/runtime/test/systems.test.ts` closes it by asserting each name's
+ * characteristic effect through this record — drag slows and does not move,
+ * integrate moves and does not slow, and so on — so a rewiring fails on what
+ * the system did rather than on what it was called.
+ *
+ * `collide` is a plain reference rather than the wrapper arrow it used to be.
+ * A `System` may accept fewer parameters, so the wrapper bought nothing, and an
+ * arrow assigned to a property takes its name from the property — which is the
+ * one function here whose identity would have followed a swap.
+ */
+export const SYSTEMS: Readonly<Record<SystemName, System>> = {
   input: applyInput,
   jitter: applyJitter,
   drag: applyDrag,
   integrate,
-  collide: (world) => {
-    collide(world);
-  },
+  collide,
 };
 
 /**
