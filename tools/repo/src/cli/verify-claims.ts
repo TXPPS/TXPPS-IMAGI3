@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   formatClaimsReport,
   parseClaims,
+  resolveTrackedPath,
   verifyClaims,
   type Claim,
   type DiffOutcome,
@@ -62,15 +63,30 @@ function markdownFilesIn(directory: string): string[] {
   return found.sort();
 }
 
-function collectClaims(files: readonly string[]): Claim[] {
+/**
+ * Every path the repository tracks, for the inferred-claim reality check.
+ *
+ * See `parseClaims`: the prose form has to be wide enough to read the gate
+ * tables, and that width also matches ordinary sentences that name a file which
+ * does not exist. A guess that names nothing real is not a claim.
+ */
+function trackedPaths(): string[] {
+  return execFileSync('git', ['ls-files'], { cwd: REPO_ROOT, encoding: 'utf8' })
+    .split('\n')
+    .filter((path) => path.length > 0);
+}
+
+function collectClaims(files: readonly string[], tracked: readonly string[]): Claim[] {
   return files.flatMap((file) =>
-    parseClaims(readFileSync(file, 'utf8'), relative(REPO_ROOT, file) || file),
+    parseClaims(readFileSync(file, 'utf8'), relative(REPO_ROOT, file) || file, (path) =>
+      resolveTrackedPath(path, tracked),
+    ),
   );
 }
 
 const files = process.argv.slice(2).map((arg) => resolve(arg));
 const targets = files.length > 0 ? files : markdownFilesIn(DEFAULT_DIR);
-const claims = collectClaims(targets);
+const claims = collectClaims(targets, trackedPaths());
 const report = verifyClaims(claims, gitDiff);
 
 if (claims.length === 0) {

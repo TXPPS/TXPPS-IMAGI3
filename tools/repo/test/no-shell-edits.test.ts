@@ -48,6 +48,32 @@ describe('findShellEdits', () => {
   });
 
   /**
+   * The four bypasses QA Automation demonstrated at the P1 gate.
+   *
+   * Three were write forms the pattern set did not model, because every rule
+   * keyed on *how* the text was produced and these produce it ordinarily. The
+   * fourth was the opt-out marker, which made all of the others academic.
+   */
+  it.each([
+    ['a plain redirect onto a source file', "printf 'x' > packages/core/src/graph.ts"],
+    ['an echo redirect onto a source file', 'echo "x" >> tools/repo/src/mutations.ts'],
+    ['a line editor driven by a script', String.raw`ex -sc '%s/a/b/|x' packages/core/src/graph.ts`],
+    [
+      'a temporary file moved onto a source file',
+      "awk '{print}' f.ts > t && mv t packages/core/src/graph.ts",
+    ],
+  ])('flags %s', (_label, line) => {
+    expect(findShellEdits('x.yml', line).length).toBeGreaterThan(0);
+  });
+
+  it('has no opt-out marker', () => {
+    // `sed -i … # no-shell-edits` used to pass, in any scanned file. An opt-out
+    // any file could write is an opt-out every file eventually writes.
+    const line = "sed -i 's/a/b/' packages/core/src/graph.ts  # no-shell-edits";
+    expect(findShellEdits('x.yml', line).length).toBeGreaterThan(0);
+  });
+
+  /**
    * Reading is not the problem and must stay legal. A check that also banned
    * `cat` and `grep` would be turned off within a week, and then the part that
    * matters would be off too.

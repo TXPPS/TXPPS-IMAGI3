@@ -85,6 +85,31 @@ describe('findAssertions', () => {
     expect(isExemptFile('tools/repo/test/assertions.test.ts')).toBe(true);
     expect(isExemptFile('packages/core/src/graph.ts')).toBe(false);
   });
+
+  it('exempts by exact path, not by filename', () => {
+    // The exemption was a filename pattern, so any file named `assertions.ts`
+    // anywhere was exempt — the filename-shaped opt-out this checker's own
+    // docstring rules out. Found by QA Automation at the P1 gate.
+    expect(isExemptFile('packages/core/src/assertions.ts')).toBe(false);
+    expect(isExemptFile('apps/editor/src/schema/assertions.test.ts')).toBe(false);
+  });
+
+  it('still catches an assertion outside the quotes on a quoted line', () => {
+    // The previous version skipped the whole line once anything on it was
+    // quoted, so this produced no site at all — while its comment claimed
+    // "only the quoted span is exempt". RC-0010's own sentence, hidden behind
+    // an unrelated quotation.
+    const line = ' * A note said "is wired"; the WebGPU leg runs today.';
+    const sites = findAssertions('x.ts', line);
+    expect(sites).toHaveLength(1);
+    expect(sites[0]?.verb).toBe('runs today');
+  });
+
+  it('still exempts a verb that is only inside quotes', () => {
+    expect(findAssertions('x.ts', ' * The comment said "the leg is wired" and it was not.')).toEqual(
+      [],
+    );
+  });
 });
 
 describe('verifyAssertions', () => {

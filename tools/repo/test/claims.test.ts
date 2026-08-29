@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatClaimsReport,
   parseClaims,
+  resolveTrackedPath,
   verifyClaim,
   verifyClaims,
   type Claim,
@@ -160,8 +161,93 @@ describe('forms the parser used to miss', () => {
     expect(parseClaims(`file:packages/core/src/graph.ts @ ${sha}`, 'd')).toHaveLength(1);
   });
 
-  it('ignores a path outside the source trees', () => {
-    // `docs/…` and `node_modules/…` are not code changes this needs to verify.
-    expect(parseClaims(`Rewritten in ${sha} (docs/GATES.md).`, 'd')).toEqual([]);
+  it('reads a claim about a document, not only about code', () => {
+    // `docs/…` used to be outside the pattern, which put every claim about the
+    // gate documents — and about `budgets.json` and `.github/` — beyond the
+    // ledger. A document asserting that a commit corrected another document is
+    // making a claim of exactly the kind RC-0010 is about.
+    expect(parseClaims(`Corrected in ${sha} (\`docs/BUDGETS.md\`).`, 'd')).toHaveLength(1);
+  });
+
+  it.each([
+    ['a root configuration file', `\`budgets.json\` must agree with STATE.md (\`${sha}\`)`],
+    ['a workflow', `Wired in \`${sha}\` (\`.github/workflows/ci.yml\`).`],
+    ['a path with no wrapping punctuation', `Fixed in ${sha}, see packages/core/src/graph.ts.`],
+    [
+      'a path a hundred characters from the sha',
+      `\`${sha}\` ${'a'.repeat(100)} \`packages/core/src/graph.ts\``,
+    ],
+  ])('reads %s', (_label, text) => {
+    // Four of the eight bypasses QA Automation demonstrated. The old pattern
+    // required the path to start `packages|apps|tools|tests`, to be preceded by
+    // `(` or a backtick, and to sit within eighty characters of the sha.
+    expect(parseClaims(text, 'd').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('reads the citation style the gate tables actually use', () => {
+    // A basename in a table cell. This is most of the ledger's coverage: the
+    // table whose rows cite commits as evidence was entirely outside it.
+    const row = `| Budget bounds | \`budgets/check.ts\` | x | \`detectors.test.ts\` (\`${sha}\`) |`;
+    const tracked = ['tools/audit/test/selftest/detectors.test.ts', 'tools/audit/src/budgets/check.ts'];
+    const claims = parseClaims(row, 'd', (path) => resolveTrackedPath(path, tracked));
+    expect(claims.map((claim) => claim.path)).toContain(
+      'tools/audit/test/selftest/detectors.test.ts',
+    );
+  });
+
+  it('does not read an all-digit CI run id as a commit', () => {
+    // `GitHub Actions run 33191437089` sits next to paths in the gate tables.
+    expect(parseClaims('Actions run 33191437089 built packages/core/src/graph.ts', 'd')).toEqual([]);
+  });
+
+  it('does read an all-digit commit, which this history has', () => {
+    // The first attempt excluded every all-digit token, which silently dropped
+    // seven table citations of `2520574` — a real commit that is all digits.
+    expect(parseClaims('Fixed in `2520574` (`packages/core/src/graph.ts`).', 'd')).toHaveLength(1);
+  });
+});
+
+/**
+ * A citation as a document writes it, resolved against the paths that exist.
+ *
+ * Gate tables name files the way people say them. Requiring a full path would
+ * make the ledger's coverage depend on documents being written for the ledger,
+ * which is how it came to cover one claim in thirty.
+ */
+describe('resolveTrackedPath', () => {
+  const tracked = [
+    'packages/core/src/graph.ts',
+    'packages/core/src/subgraph.ts',
+    'tools/audit/src/budgets/check.ts',
+    'tools/repo/src/cli/check.ts',
+  ];
+
+  it('takes an exact path unchanged', () => {
+    expect(resolveTrackedPath('packages/core/src/graph.ts', tracked)).toBe(
+      'packages/core/src/graph.ts',
+    );
+  });
+
+  it('resolves a unique basename', () => {
+    expect(resolveTrackedPath('graph.ts', tracked)).toBe('packages/core/src/graph.ts');
+  });
+
+  it('matches on a path segment, not on any suffix', () => {
+    // `graph.ts` must not resolve to `subgraph.ts`; the boundary is a slash.
+    expect(resolveTrackedPath('subgraph.ts', tracked)).toBe('packages/core/src/subgraph.ts');
+  });
+
+  it('resolves a partial path that is unique', () => {
+    expect(resolveTrackedPath('budgets/check.ts', tracked)).toBe('tools/audit/src/budgets/check.ts');
+  });
+
+  it('refuses an ambiguous citation rather than guessing', () => {
+    // A claim about the wrong file is worse than an unchecked sentence. The fix
+    // is to write one more path segment.
+    expect(resolveTrackedPath('check.ts', tracked)).toBeUndefined();
+  });
+
+  it('refuses a citation that names nothing', () => {
+    expect(resolveTrackedPath('STATE.md', tracked)).toBeUndefined();
   });
 });

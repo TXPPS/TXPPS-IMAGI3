@@ -61,20 +61,26 @@ export interface AssertionSite {
 }
 
 /**
- * Whether the line is reporting someone else's words rather than asserting.
+ * The part of a line that is the document speaking, or undefined for a line
+ * that is entirely a quotation.
  *
- * A markdown blockquote, or a line whose assertion sits inside quotation marks.
- * The second is checked by stripping quoted spans and re-testing: if the verb
- * survives the strip it was the document's own claim.
+ * Quoted spans are removed and what remains is what gets tested. That is the
+ * difference between this and what it replaced: the previous version answered
+ * "is anything on this line quoted?" and the caller then **skipped the whole
+ * line**, so `// A note said "is wired"; the WebGPU leg runs today.` produced
+ * no site at all. Its own comment claimed the opposite — "only the quoted span
+ * is exempt, so an assertion outside the quotes on the same line is still
+ * caught" — which QA Automation falsified at the P1 gate, in the file that
+ * exists to catch claims like that one.
+ *
+ * The blockquote marker is tested on the raw line. Stripping leading markup
+ * first — as an earlier version did — removes the `>` before looking for it, so
+ * every blockquote read as an assertion. Caught by the checker's own first run
+ * against docs/BUGS.md, which quotes the sentences RC-0010 is about.
  */
-function isQuoted(line: string): boolean {
-  // The blockquote marker is tested on the raw line. Stripping leading markup
-  // first — as this did — removes the `>` before looking for it, so every
-  // blockquote read as an assertion. Caught by the checker's own first run
-  // against docs/BUGS.md, which quotes the sentences RC-0010 is about.
-  if (line.trimStart().startsWith('>')) return true;
-  const stripped = line.replace(/["“][^"”]*["”]/gu, '');
-  return ASSERTION_PATTERNS.some(({ pattern }) => pattern.test(line) && !pattern.test(stripped));
+function assertableText(line: string): string | undefined {
+  if (line.trimStart().startsWith('>')) return undefined;
+  return line.replace(/["“][^"”]*["”]/gu, '');
 }
 
 function referenceOn(line: string): string | undefined {
@@ -93,21 +99,31 @@ function referenceOn(line: string): string | undefined {
  * the two on one line would only teach people to write longer lines.
  */
 /**
- * Files exempt from scanning.
+ * Files exempt from scanning, by exact repository-relative path.
  *
  * Only the two that define or exercise the vocabulary. A file that lists every
  * verb the checker looks for necessarily contains every verb the checker looks
- * for, and scanning it yields nothing but reports about itself. The exemption
- * is by path and is deliberately not extensible by a comment marker — an
- * opt-out any file could write is an opt-out every file eventually writes.
+ * for, and scanning it yields nothing but reports about itself.
+ *
+ * **Exact paths, not a filename pattern.** This was `/(?:^|\/)assertions\.
+ * (?:test\.)?ts$/`, which exempts a file called `assertions.ts` *anywhere* —
+ * the filename-shaped opt-out the paragraph below rules out, in the file that
+ * rules it out. Adding a new exempt file is now a visible one-line diff someone
+ * has to justify.
+ *
+ * There is deliberately no comment marker: an opt-out any file could write is
+ * an opt-out every file eventually writes.
  */
-const EXEMPT = /(?:^|\/)assertions\.(?:test\.)?ts$/u;
+const EXEMPT_PATHS: ReadonlySet<string> = new Set([
+  'tools/repo/src/assertions.ts',
+  'tools/repo/test/assertions.test.ts',
+]);
 
 /** Enough of the offending line to recognise it without wrapping the report. */
 const EXCERPT_CHARS = 120;
 
 export function isExemptFile(file: string): boolean {
-  return EXEMPT.test(file);
+  return EXEMPT_PATHS.has(file);
 }
 
 export function findAssertions(file: string, contents: string): AssertionSite[] {
@@ -118,11 +134,12 @@ export function findAssertions(file: string, contents: string): AssertionSite[] 
     // A quotation reports what someone else claimed; it is not this document
     // claiming it. The incident write-ups in docs/BUGS.md quote the exact false
     // sentences they exist to record, and flagging those would make the history
-    // unwritable. Narrow on purpose: only the quoted span is exempt, so an
-    // assertion outside the quotes on the same line is still caught.
-    if (isQuoted(line)) continue;
+    // unwritable. Only the quoted span is exempt: the rest of the line is
+    // still the document speaking, and is still tested.
+    const claim = assertableText(line);
+    if (claim === undefined) continue;
     for (const { verb, pattern } of ASSERTION_PATTERNS) {
-      if (!pattern.test(line)) continue;
+      if (!pattern.test(claim)) continue;
       const window = [lines[index - 1] ?? '', line, lines[index + 1] ?? '', lines[index + 2] ?? ''];
       sites.push({
         file,

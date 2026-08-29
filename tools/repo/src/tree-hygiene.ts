@@ -76,6 +76,89 @@ function isExpected(path: string): boolean {
 }
 
 /**
+ * Ignored directories this check looks *inside*.
+ *
+ * `git status` honours `.gitignore`, so until this existed a file dropped into
+ * `test-results/` reported TREE CLEAN — and `test-results/` is Playwright's own
+ * output directory, which is where the stray that prompted this whole check
+ * would most naturally have landed. QA Automation demonstrated it at the P1
+ * gate with `test-results/rv-nav.mjs` and `.edits/rv-nav.mjs`, both invisible.
+ *
+ * These hold traces, screenshots, videos and measurement JSON. None of them
+ * ever legitimately contains a script.
+ *
+ * `.edits` is here as a backstop rather than a necessity. It was a gitignored
+ * directory of one-off scripts written to edit source — the practice S7 bans,
+ * and it had accumulated 44 of them — so it is no longer ignored and
+ * {@link findStrays} sees anything left there. It stays on this list so that
+ * re-adding the ignore rule does not silently reopen the hole.
+ */
+export const SCANNED_ARTIFACT_DIRS: readonly string[] = [
+  'test-results',
+  '.audit-out',
+  '.edits',
+  'screenshots/actual',
+  'screenshots/diff',
+];
+
+/**
+ * Ignored directories deliberately **not** scanned, and why.
+ *
+ * `node_modules`, `dist`, `dist-types`, `coverage`, `.vite`, `playwright-report`
+ * and `blob-report` all legitimately contain JavaScript — bundles, instrumented
+ * sources, Playwright's own report assets. Scanning them for scripts would
+ * report thousands of files, and a check that always fires is a check nobody
+ * reads.
+ *
+ * That is a real limit and it is stated rather than left to be discovered: a
+ * file hidden in `playwright-report/` is not caught by this. What is caught is
+ * every place a reviewer's own artifact plausibly lands.
+ */
+export const UNSCANNED_GENERATED_DIRS: readonly string[] = [
+  'node_modules',
+  'dist',
+  'dist-types',
+  'coverage',
+  '.vite',
+  'playwright-report',
+  'blob-report',
+];
+
+/** Extensions that are never an output of a test run or a measurement. */
+export const SCRIPT_EXTENSIONS: readonly string[] = [
+  '.mjs',
+  '.cjs',
+  '.js',
+  '.ts',
+  '.mts',
+  '.cts',
+  '.tsx',
+  '.sh',
+  '.bash',
+  '.py',
+  '.rb',
+];
+
+/**
+ * Strays among files found inside the scanned artifact directories.
+ *
+ * Takes the paths rather than walking, for the same reason {@link findStrays}
+ * takes porcelain text: a classifier that can only be exercised against
+ * whatever the disk happens to hold has never been shown to classify anything.
+ */
+export function findArtifactStrays(paths: readonly string[]): StrayFile[] {
+  const strays: StrayFile[] = [];
+  for (const path of paths) {
+    if (!SCRIPT_EXTENSIONS.some((extension) => path.endsWith(extension))) continue;
+    strays.push({
+      path,
+      reason: 'script inside a test-output directory, which holds only run artifacts',
+    });
+  }
+  return strays;
+}
+
+/**
  * Strays in a `git status --porcelain` listing.
  *
  * Takes the porcelain text rather than shelling out, so the classification is

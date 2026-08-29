@@ -3,6 +3,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findRepoRoot } from '@imagi3/audit';
 import { findAssertions, formatAssertionReport, verifyAssertions } from '../assertions.ts';
+import {
+  TEST_FILE,
+  WORKFLOW_FILE,
+  jobNamesIn,
+  referenceKind,
+  resolvesAgainst,
+  testTitlesIn,
+} from '../references.ts';
 
 /**
  * Fail the build for a comment asserting a runtime property with nothing behind
@@ -25,30 +33,29 @@ function trackedFiles(repoRoot: string): string[] {
 
 /**
  * A reference resolves when the path exists, or when the named test or CI job
- * is found in the tree.
+ * exists **in the position that makes it that kind of name**.
  *
- * `test:` and `ci:` are matched textually against tracked files, which is
- * coarse. A name that appears in a comment and nowhere else still fails, which
- * is the case that matters; a name that appears in an unrelated file passes,
- * which review has to catch. Stated rather than implied.
+ * The rules and the reasoning are in `references.ts`, which is where they can
+ * be tested. This function is the part that needs a filesystem.
  */
 function makeResolver(repoRoot: string, files: readonly string[]): (ref: string) => boolean {
-  const corpus = new Map<string, string>();
-  const read = (path: string): string => {
-    const cached = corpus.get(path);
-    if (cached !== undefined) return cached;
-    const text = readFileSync(join(repoRoot, path), 'utf8');
-    corpus.set(path, text);
-    return text;
+  const read = (path: string): string => readFileSync(join(repoRoot, path), 'utf8');
+  let testTitles: string[] | undefined;
+  let jobNames: string[] | undefined;
+
+  const titles = (): string[] => {
+    testTitles ??= files.filter((path) => TEST_FILE.test(path)).flatMap((p) => testTitlesIn(read(p)));
+    return testTitles;
+  };
+  const jobs = (): string[] => {
+    jobNames ??= files.filter((path) => WORKFLOW_FILE.test(path)).flatMap((p) => jobNamesIn(read(p)));
+    return jobNames;
   };
 
   return (reference: string) => {
-    if (!reference.startsWith('test:') && !reference.startsWith('ci:')) {
-      return existsSync(join(repoRoot, reference));
-    }
-    const name = reference.slice(reference.indexOf(':') + 1).trim();
-    if (name.length === 0) return false;
-    return files.some((path) => read(path).includes(name));
+    const kind = referenceKind(reference);
+    if (kind === undefined) return existsSync(join(repoRoot, reference));
+    return resolvesAgainst(reference, kind === 'test' ? titles() : jobs());
   };
 }
 

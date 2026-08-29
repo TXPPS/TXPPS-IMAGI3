@@ -43,6 +43,9 @@ interface Pattern {
  * not matched — `cat`, `grep`, `sed -n` and a heredoc piped into an interpreter
  * that only reads are all still fine.
  */
+/** A path that is source, for the rules that key on the write target. */
+const SOURCE_PATH = String.raw`(?:packages|apps|tools|tests)/\S+\.(?:ts|tsx|mts|cts|js|mjs|cjs|json)`;
+
 const PATTERNS: readonly Pattern[] = [
   {
     rule: 'heredoc-redirect',
@@ -59,16 +62,46 @@ const PATTERNS: readonly Pattern[] = [
     pattern:
       /\b(?:node|python3?|ruby)\b[^\n]*\s-(?:e|c)\b[^\n]*(?:writeFileSync|\.write\(|>\s*\S)/u,
   },
+  {
+    // `printf 'x' > packages/core/src/graph.ts`. The first three rules all key
+    // on *how* the text is produced, which is why a plain redirect walked past
+    // them; this one keys on what is being overwritten. A redirect cannot
+    // report that it changed nothing either.
+    rule: 'redirect-onto-source',
+    pattern: new RegExp(String.raw`>>?\s*['"]?${SOURCE_PATH}`, 'u'),
+  },
+  {
+    // `awk '{print}' f.ts > tmp && mv tmp packages/core/src/graph.ts`. The
+    // redirect goes to a temporary, so the rule above misses it; the move is
+    // the write, and it is equally blind to whether anything changed.
+    rule: 'move-onto-source',
+    pattern: new RegExp(String.raw`\b(?:mv|cp|install)\b[^\n]*\s['"]?${SOURCE_PATH}`, 'u'),
+  },
+  {
+    // `ex -sc '%s/a/b/|x' file`, and `ed` driven by a script. Line editors are
+    // `sed -i` with a different spelling.
+    rule: 'line-editor',
+    pattern: /\b(?:ex|ed)\s+-[a-z]*(?:s|c)\b/u,
+  },
 ];
 
-/** Lines that introduce an unverified source edit, with the rule each broke. */
+/**
+ * Lines that introduce an unverified source edit, with the rule each broke.
+ *
+ * **There is no opt-out marker.** There was one — any line containing the
+ * string `no-shell-edits` was skipped, in any scanned file — added so this
+ * check could be documented without tripping itself. QA Automation found it at
+ * the P1 gate: `sed -i 's/a/b/' packages/core/src/graph.ts  # no-shell-edits`
+ * passed. `assertions.ts` states the rule it broke, which is that an opt-out
+ * any file could write is an opt-out every file eventually writes.
+ *
+ * It also bought nothing. Only `.sh`, `.bash`, `.yml` and `.yaml` are scanned,
+ * and no such file in this repository mentions the rule; the documentation that
+ * needed protecting is in TypeScript, which is not scanned at all.
+ */
 export function findShellEdits(file: string, contents: string): ShellEditFinding[] {
   const findings: ShellEditFinding[] = [];
   for (const [index, text] of contents.split('\n').entries()) {
-    // A line that names the rule it would otherwise trip is this file, or the
-    // documentation of this file. Matching those would make the check
-    // undocumentable, which is a poor trade for the coverage it costs.
-    if (text.includes('no-shell-edits')) continue;
     for (const { rule, pattern } of PATTERNS) {
       if (pattern.test(text)) findings.push({ file, line: index + 1, rule, text: text.trim() });
     }
